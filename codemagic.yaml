@@ -4,9 +4,9 @@ workflows:
     max_build_duration: 60
     environment:
       xcode: 15.4
-    vars:
-      SCHEME: TendersApp
-      BUNDLE_ID: com.aaron.schmidt.tenders
+      vars:
+        SCHEME: TendersApp
+        BUNDLE_ID: com.aaron.schmidt.tenders
     scripts:
       - name: Install Xcode project dependencies
         script: |
@@ -27,7 +27,3 @@ workflows:
     artifacts:
       - ipa
       - dSYM
-    publishing:
-      email:
-        recipients:
-          - aaron.schmidt.consulting@gmail.com
