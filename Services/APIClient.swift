@@ -1,7 +1,7 @@
 import Foundation
 import Combine
 
-// Minimales TED-Modell für die Liste
+// Minimales TED-Modell (robuste Felder quer über Formate)
 private struct TedNoticeLite: Decodable {
     let id: String?
     let title: String?
@@ -25,9 +25,9 @@ final class APIClient {
     static let shared = APIClient()
     private init() {}
 
-    /// Combine-Variante (bestehende Pipelines bleiben nutzbar)
+    /// Combine-Variante: wird in den ViewModels verwendet
     func search(filters: SearchFilters) -> AnyPublisher<[Tender], Error> {
-        // Expert-Query aus UI-Filtern bauen
+        // 1) Expert-Query aus UI-Filtern bauen
         var terms: [String] = []
 
         if !filters.regions.isEmpty {
@@ -44,14 +44,14 @@ final class APIClient {
         }
 
         let q = terms.isEmpty
-        ? "type:contract-notice OR type:contract-award"
-        : terms.joined(separator: " AND ")
+            ? "type:contract-notice OR type:contract-award"
+            : terms.joined(separator: " AND ")
 
+        // 2) Body minimal halten (manche Gateways reagieren empfindlich auf 'fields')
         let body: [String: Any] = [
             "q": q,
             "page": 1,
-            "limit": 25,
-            "fields": ["id","title","publicationDate","buyerCountry","links.pdf","links.html"]
+            "limit": 25
         ]
 
         guard let url = URL(string: "https://api.ted.europa.eu/v3/notices/search") else {
@@ -61,14 +61,21 @@ final class APIClient {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue("TendersApp/1.0 (iOS)", forHTTPHeaderField: "User-Agent")
         do { req.httpBody = try JSONSerialization.data(withJSONObject: body) }
         catch { return Fail(error: error).eraseToAnyPublisher() }
 
+        // 3) Request & robustes Fehlerhandling
         return URLSession.shared.dataTaskPublisher(for: req)
             .tryMap { out in
-                guard let http = out.response as? HTTPURLResponse,
-                      (200..<300).contains(http.statusCode) else {
+                guard let http = out.response as? HTTPURLResponse else {
                     throw URLError(.badServerResponse)
+                }
+                guard (200..<300).contains(http.statusCode) else {
+                    let msg = String(data: out.data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
+                    throw NSError(domain: "TEDSearch", code: http.statusCode,
+                                  userInfo: [NSLocalizedDescriptionKey: msg])
                 }
                 return out.data
             }
@@ -94,8 +101,7 @@ final class APIClient {
             .eraseToAnyPublisher()
     }
 
-    /// Async/await-Wrapper, damit bestehende Aufrufer wie
-    /// `SavedSearchManager.asyncSearch` weiterhin funktionieren.
+    /// Async/await-Wrapper, z. B. für SavedSearchManager
     func asyncSearch(filters: SearchFilters) async throws -> [Tender] {
         try await withCheckedThrowingContinuation { cont in
             var cancellable: AnyCancellable?
