@@ -107,7 +107,7 @@ struct SearchView: View {
                     Button {
                         saveSearchName = ""
                         showingSaveSheet = true
-                    } label: { Image(systemImage: "bookmark") }
+                    } label: { Image(systemName: "bookmark") }
                     .accessibilityLabel("Suche speichern")
                 }
             }
