@@ -1,0 +1,62 @@
+workflows:
+  ios_ipa:
+    name: Build iOS IPA
+    max_build_duration: 60
+    environment:
+      xcode: 15.4
+      vars:
+        SCHEME: TendersApp
+        CONFIGURATION: Release
+        BUNDLE_ID: com.example.TendersApp
+      groups:
+        - app_store_credentials   # defined in Codemagic UI
+    scripts:
+      - name: Install XcodeGen
+        script: |
+          brew install xcodegen
+      - name: Generate Xcode project
+        script: |
+          xcodegen generate
+          ls -la
+      - name: Increment build number
+        script: |
+          cd TendersApp
+          agvtool new-version -all $BUILD_NUMBER
+      - name: Resolve signing (automatic via API key)
+        script: |
+          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
+          keychain initialize
+          keychain add-certificates
+      - name: Archive
+        script: |
+          xcodebuild -project TendersApp.xcodeproj \
+            -scheme "$SCHEME" \
+            -configuration "$CONFIGURATION" \
+            -destination 'generic/platform=iOS' \
+            -archivePath $CM_BUILD_DIR/TendersApp.xcarchive \
+            clean archive | xcpretty
+      - name: Export IPA
+        script: |
+          cat > ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>compileBitcode</key><false/>
+            <key>method</key><string>app-store</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>destination</key><string>export</string>
+            <key>stripSwiftSymbols</key><true/>
+            <key>teamID</key><string>YOUR_TEAM_ID</string>
+          </dict></plist>
+          EOF
+          xcodebuild -exportArchive \
+            -archivePath $CM_BUILD_DIR/TendersApp.xcarchive \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath $CM_OUTPUT_DIR | xcpretty
+    artifacts:
+      - $CM_OUTPUT_DIR/*.ipa
+      - $CM_BUILD_DIR/TendersApp.xcarchive
+    publishing:
+      email:
+        recipients:
+          - your@email
