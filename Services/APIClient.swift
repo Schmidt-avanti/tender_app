@@ -1,78 +1,70 @@
 import Foundation
 import Combine
 
-// Antworthülle so generisch wie möglich
+// ---------- Dynamische Decodierung ----------
 private struct TedSearchResponseDynamic: Decodable {
     let total: Int?
-    let notices: [ [String: AnyDecodable] ]?
+    let notices: [[String: AnyDecodable]]?
 
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.total = try c.decodeIfPresent(Int.self, forKey: .total)
-        self.notices = try c.decodeIfPresent([ [String: AnyDecodable] ].self, forKey: .notices)
-    }
     enum CodingKeys: String, CodingKey { case total, notices }
 }
 
-// Minimaler „AnyDecodable“ für dynamische Feldwerte
 private struct AnyDecodable: Decodable {
     let value: Any
     init(from decoder: Decoder) throws {
         let c = try decoder.singleValueContainer()
-        if let s = try? c.decode(String.self) { value = s; return }
-        if let i = try? c.decode(Int.self) { value = i; return }
-        if let d = try? c.decode(Double.self) { value = d; return }
-        if let b = try? c.decode(Bool.self) { value = b; return }
-        if let dict = try? c.decode([String: AnyDecodable].self) {
-            value = dict.mapValues { $0.value }; return
+        if let v = try? c.decode(String.self)  { value = v; return }
+        if let v = try? c.decode(Int.self)     { value = v; return }
+        if let v = try? c.decode(Double.self)  { value = v; return }
+        if let v = try? c.decode(Bool.self)    { value = v; return }
+        if let v = try? c.decode([String: AnyDecodable].self) {
+            value = v.mapValues { $0.value }; return
         }
-        if let arr = try? c.decode([AnyDecodable].self) {
-            value = arr.map { $0.value }; return
+        if let v = try? c.decode([AnyDecodable].self) {
+            value = v.map { $0.value }; return
         }
         value = NSNull()
     }
 }
 
-/// HTTP-Client für TED Europa (ohne API-Key).
-/// Robust: passt `fields` bei 400-Fehlern aus der Serverfehlermeldung automatisch an.
+// ---------- API-Client ----------
 final class APIClient {
     static let shared = APIClient()
     private init() {}
 
-    // Start-Kandidaten (häufig vorhanden)
-    private let preferredFields: [String] = [
-        // häufige eForms Felder:
-        "BT-24-NoticeTitle",            // Titel (wenn vorhanden)
-        "country-buyer",                // Land des Auftraggebers
-        "submission-url-lot",           // URL zum Los (Nutzerlink)
-        // Fallback-URLs (verschiedene Gateways)
+    // Wunschfelder (werden ggf. per Server-Fehlerliste ersetzt)
+    private let preferredFields = [
+        "BT-24-NoticeTitle",
+        "country-buyer",
+        "submission-url-lot",
         "touchpoint-internet-address-paying",
         "touchpoint-internet-address-fiscal-legis-lot",
-        // Metadaten
         "publication-date-notice"
     ]
 
     func search(filters: SearchFilters) -> AnyPublisher<[Tender], Error> {
-        let query = buildExpertQuery(from: filters)
-        // erster Versuch mit unseren Wunschfeldern
-        return performSearch(query: query, fields: preferredFields)
+        let q = buildExpertQuery(from: filters)
+
+        // 1. Versuch mit Wunschfeldern
+        return performSearch(query: q, fields: preferredFields)
+            // Wenn Query-Syntax-Fehler → automatische, garantiert gültige Fallback-Query
             .catch { [weak self] error -> AnyPublisher<[Tender], Error> in
-                guard
-                    let self,
-                    let retryFields = self.extractSupportedFields(from: error),
-                    !retryFields.isEmpty
-                else {
-                    return Fail(error: error).eraseToAnyPublisher()
+                guard let self else { return Fail(error: error).eraseToAnyPublisher() }
+                if self.isQuerySyntaxError(error) {
+                    let fallbackQ = #"type = "contract-notice""#
+                    return self.performSearch(query: fallbackQ, fields: self.preferredFields)
                 }
-                // sichere Minimalmenge wählen: Land + irgendein URL-Feld, optional Title
-                let minimal = self.pickMinimalFieldSet(from: retryFields)
-                return self.performSearch(query: query, fields: minimal)
+                // Wenn Fields ungültig → aus Fehlermeldung unterstützte Felder ziehen und retry
+                if let supported = self.extractSupportedFields(from: error), !supported.isEmpty {
+                    let minimal = self.pickMinimalFieldSet(from: supported)
+                    return self.performSearch(query: q, fields: minimal)
+                }
+                return Fail(error: error).eraseToAnyPublisher()
             }
             .eraseToAnyPublisher()
     }
 
-    // MARK: - Request
-
+    // ---------- Request/Response ----------
     private func performSearch(query: String, fields: [String]) -> AnyPublisher<[Tender], Error> {
         guard let url = URL(string: "https://api.ted.europa.eu/v3/notices/search") else {
             return Fail(error: URLError(.badURL)).eraseToAnyPublisher()
@@ -101,10 +93,9 @@ final class APIClient {
                     throw URLError(.badServerResponse)
                 }
                 guard (200..<300).contains(http.statusCode) else {
-                    // Fehlermeldung mitschicken (wird für das Auto-Retry geparst)
-                    let message = String(data: out.data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
+                    let msg = String(data: out.data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
                     throw NSError(domain: "TEDSearch", code: http.statusCode,
-                                  userInfo: [NSLocalizedDescriptionKey: message])
+                                  userInfo: [NSLocalizedDescriptionKey: msg])
                 }
                 return out.data
             }
@@ -117,28 +108,21 @@ final class APIClient {
             .eraseToAnyPublisher()
     }
 
-    // MARK: - Mapping
-
     private func mapDynamicNotice(_ dict: [String: AnyDecodable]) -> Tender {
-        // Versuche sinnvolle Felder zu finden
         let country = (dict["country-buyer"]?.value as? String)
-        // URL aus mehreren möglichen Feldern
+
         let urlString =
             (dict["submission-url-lot"]?.value as? String) ??
             (dict["touchpoint-internet-address-paying"]?.value as? String) ??
             (dict["touchpoint-internet-address-fiscal-legis-lot"]?.value as? String)
         let url = urlString.flatMap(URL.init(string:))
 
-        // Titel-Varianten
         let title =
             (dict["BT-24-NoticeTitle"]?.value as? String) ??
             "Ausschreibung \(country ?? "")"
 
-        // Datum (wenn vorhanden)
-        let _ = dict["publication-date-notice"]?.value as? String
-
         return Tender(
-            id: UUID().uuidString,    // Falls kein ID-Feld angefordert wurde
+            id: UUID().uuidString,
             source: "TED",
             title: title,
             buyer: nil,
@@ -151,35 +135,53 @@ final class APIClient {
         )
     }
 
-    // MARK: - Query builder
-
+    // ---------- Query-Builder (neue Syntax!) ----------
     private func buildExpertQuery(from filters: SearchFilters) -> String {
-        var terms: [String] = []
+        var parts: [String] = []
+
         if !filters.regions.isEmpty {
-            let countries = filters.regions.map { $0.uppercased() }.joined(separator: " OR ")
-            terms.append("(buyerCountry:\(countries))")
+            // buyerCountry IN ("DE","FR")
+            let countries = filters.regions
+                .map { "\"\($0.uppercased())\"" }
+                .joined(separator: ",")
+            parts.append("buyerCountry IN (\(countries))")
         }
+
         if !filters.cpv.isEmpty {
-            let cpv = filters.cpv.joined(separator: " OR ")
-            terms.append("(cpvCode:\(cpv))")
+            // cpvCode IN ("30200000","79500000")
+            let cpv = filters.cpv
+                .map { "\"\($0)\"" }
+                .joined(separator: ",")
+            parts.append("cpvCode IN (\(cpv))")
         }
+
         let text = filters.freeText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !text.isEmpty { terms.append("text:\(text)") }
-        return terms.isEmpty
-            ? "type:contract-notice OR type:contract-award"
-            : terms.joined(separator: " AND ")
+        if !text.isEmpty {
+            // enthält: text ~ "..."
+            let escaped = text.replacingOccurrences(of: "\"", with: "\\\"")
+            parts.append(#"text ~ "\#(escaped)""#)
+        }
+
+        if parts.isEmpty {
+            // Default: gültige Syntax
+            return #"type IN ("contract-notice","contract-award")"#
+        } else {
+            return parts.joined(separator: " AND ")
+        }
     }
 
-    // MARK: - Fehlerauswertung & Feldauswahl
+    // ---------- Fehlerauswertung ----------
+    private func isQuerySyntaxError(_ error: Error) -> Bool {
+        let msg = (error as NSError).userInfo[NSLocalizedDescriptionKey] as? String ?? ""
+        return msg.uppercased().contains("QUERY_SYNTAX_ERROR")
+    }
 
-    /// Extrahiert aus einer 400-Fehlermeldung die „supported values“-Liste.
     private func extractSupportedFields(from error: Error) -> [String]? {
         let msg = (error as NSError).userInfo[NSLocalizedDescriptionKey] as? String ?? ""
-        guard let range = msg.range(of: "supported values are:") else { return nil }
-        let list = msg[range.upperBound...]
+        guard let rng = msg.range(of: "supported values are:") else { return nil }
+        let list = msg[rng.upperBound...]
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: " ():"))
-        // split an Kommas, trimmen
         let tokens = list
             .split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -187,16 +189,11 @@ final class APIClient {
         return tokens
     }
 
-    /// Wählt eine minimale, nutzbare Kombination aus den unterstützten Feldern.
-    /// Ziel: mindestens ein Land und eine URL.
     private func pickMinimalFieldSet(from supported: [String]) -> [String] {
         var chosen = [String]()
         func pick(_ name: String) { if supported.contains(name) { chosen.append(name) } }
-
-        // bevorzugt Titel, Land und eine URL
         pick("BT-24-NoticeTitle")
         pick("country-buyer")
-        // eine von mehreren möglichen URL-Spalten
         let urlCandidates = [
             "submission-url-lot",
             "touchpoint-internet-address-paying",
@@ -205,13 +202,11 @@ final class APIClient {
         if let urlField = urlCandidates.first(where: { supported.contains($0) }) {
             chosen.append(urlField)
         }
-        // falls gar nichts gepickt wurde, nimm einfach das erste unterstützte Feld, um die Validierung zu erfüllen
         if chosen.isEmpty, let first = supported.first { chosen = [first] }
-        return Array(Set(chosen)) // de-dupe
+        return Array(Set(chosen))
     }
 
-    // MARK: - Async/Await-Wrapper
-
+    // ---------- Async/Await ----------
     func asyncSearch(filters: SearchFilters) async throws -> [Tender] {
         try await withCheckedThrowingContinuation { cont in
             var cancellable: AnyCancellable?
