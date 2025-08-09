@@ -4,105 +4,65 @@ workflows:
     max_build_duration: 60
     environment:
       xcode: 16.4
-      groups:
-        - app-secrets     # optional: für OPENAI_API_KEY u.a.
+      cocoapods: default
       vars:
-        CONFIGURATION: Release
-
+        PROJECT: "TendersApp.xcodeproj"
+        SCHEME: "TendersApp"
+      groups:
+        - app-secrets   # enthält OPENAI_API_KEY, SERP_API_KEY (optional BING_API_KEY)
     scripts:
       - name: Show macOS & Xcode
         script: |
-          sw_vers
           xcodebuild -version
+          sw_vers
 
-      - name: Locate project/workspace (or generate with XcodeGen)
+      - name: Resolve Swift Package dependencies
         script: |
-          set -euo pipefail
+          xcodebuild -resolvePackageDependencies -project "$PROJECT" -scheme "$SCHEME"
 
-          find_xcproj() {
-            WORKSPACE_FILE=$(find . -maxdepth 6 -type d -name "*.xcworkspace" | head -n 1 || true)
-            PROJECT_FILE=$(find . -maxdepth 6 -type d -name "*.xcodeproj"    | head -n 1 || true)
-          }
-
-          find_xcproj
-
-          if [[ -z "${WORKSPACE_FILE}" && -z "${PROJECT_FILE}" ]]; then
-            echo "No .xcworkspace or .xcodeproj found. Generating with XcodeGen…"
-            brew install xcodegen
-            if [[ ! -f project.yml ]]; then
-              echo "❌ project.yml not found in repo root."
-              exit 66
-            fi
-            xcodegen generate
-            find_xcproj
-          fi
-
-          if [[ -n "${WORKSPACE_FILE}" ]]; then
-            echo "Using workspace: ${WORKSPACE_FILE}"
-            BUILD_REF="workspace"
-            BUILD_FILE="${WORKSPACE_FILE}"
-          elif [[ -n "${PROJECT_FILE}" ]]; then
-            echo "Using project: ${PROJECT_FILE}"
-            BUILD_REF="project"
-            BUILD_FILE="${PROJECT_FILE}"
-          else
-            echo "❌ No .xcworkspace or .xcodeproj found."
-            exit 66
-          fi
-
-          # Detect first shared scheme
-          if [[ "${BUILD_REF}" == "workspace" ]]; then
-            SCHEMES=$(xcodebuild -list -json -workspace "${BUILD_FILE}" 2>/dev/null | /usr/bin/python3 -c 'import sys,json;print("\n".join(json.load(sys.stdin)["workspace"]["schemes"]))')
-          else
-            SCHEMES=$(xcodebuild -list -json -project "${BUILD_FILE}" 2>/dev/null | /usr/bin/python3 -c 'import sys,json;print("\n".join(json.load(sys.stdin)["project"]["schemes"]))')
-          fi
-          if [[ -z "${SCHEMES}" ]]; then
-            echo "❌ No schemes found (make sure scheme is shared / XcodeGen created one)."
-            exit 67
-          fi
-
-          SCHEME=$(echo "${SCHEMES}" | head -n 1)
-          echo "Detected scheme: ${SCHEME}"
-          echo "BUILD_REF=${BUILD_REF}" >> $CM_ENV
-          echo "BUILD_FILE=${BUILD_FILE}" >> $CM_ENV
-          echo "SCHEME=${SCHEME}"       >> $CM_ENV
-
-      - name: Clean
+      - name: Write API keys into Info.plist
         script: |
-          rm -rf DerivedData || true
+          set -e
+          PLIST="Info.plist"
+          if [ ! -f "$PLIST" ]; then
+            echo "Info.plist not found at repo root"; exit 1
+          fi
+
+          # OPENAI_API_KEY (required)
+          /usr/libexec/PlistBuddy -c "Delete :OPENAI_API_KEY" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Add :OPENAI_API_KEY string $OPENAI_API_KEY" "$PLIST"
+
+          # SERP_API_KEY (optional)
+          if [ -n "$SERP_API_KEY" ]; then
+            /usr/libexec/PlistBuddy -c "Delete :SERP_API_KEY" "$PLIST" || true
+            /usr/libexec/PlistBuddy -c "Add :SERP_API_KEY string $SERP_API_KEY" "$PLIST"
+          fi
+
+          # BING_API_KEY (optional)
+          if [ -n "$BING_API_KEY" ]; then
+            /usr/libexec/PlistBuddy -c "Delete :BING_API_KEY" "$PLIST" || true
+            /usr/libexec/PlistBuddy -c "Add :BING_API_KEY string $BING_API_KEY" "$PLIST"
+          fi
 
       - name: Build (no code signing)
         script: |
-          set -euo pipefail
-          if [[ "${BUILD_REF}" == "workspace" ]]; then
-            xcodebuild -workspace "$BUILD_FILE" -scheme "$SCHEME" -configuration "$CONFIGURATION" -sdk iphoneos -derivedDataPath DerivedData CODE_SIGN_IDENTITY= CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
-          else
-            xcodebuild -project "$BUILD_FILE"  -scheme "$SCHEME" -configuration "$CONFIGURATION" -sdk iphoneos -derivedDataPath DerivedData CODE_SIGN_IDENTITY= CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
-          fi
-
-      - name: Package unsigned .ipa for Sideloadly
-        script: |
-          set -euo pipefail
-          APP_PATH=$(find DerivedData/Build/Products -type d -name "*.app" | head -n 1)
-          echo "Found app at: $APP_PATH"
-          test -d "$APP_PATH"
-          mkdir -p Payload
-          cp -R "$APP_PATH" Payload/
-          zip -qry "TendersApp-unsigned.ipa" Payload
-          rm -rf Payload
-          echo "Unsigned IPA created: TendersApp-unsigned.ipa"
+          set -e
+          xcodebuild \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            build
 
     artifacts:
-      - TendersApp-unsigned.ipa
-      - DerivedData/Build/Products/**/*.app
-      - /tmp/xcodebuild_logs/*.log
-
+      - DerivedData/Build/Products/Release-iphoneos/*.app
+      - $CM_BUILD_DIR/ResultBundle_*.xcresult
     publishing:
       email:
         recipients:
-          - aaron.schmidt.consulting@gmail.com
+          - you@example.com
         notify:
-          success: false
+          success: true
           failure: true
-
 
