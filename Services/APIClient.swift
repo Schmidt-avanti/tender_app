@@ -1,7 +1,7 @@
 import Foundation
 import Combine
 
-// Minimales TED-Modell (robuste Felder quer über Formate)
+// Minimales TED-Modell für die Liste
 private struct TedNoticeLite: Decodable {
     let id: String?
     let title: String?
@@ -25,7 +25,7 @@ final class APIClient {
     static let shared = APIClient()
     private init() {}
 
-    /// Combine-Variante: wird in den ViewModels verwendet
+    /// Combine-Variante (bestehende Pipelines bleiben nutzbar)
     func search(filters: SearchFilters) -> AnyPublisher<[Tender], Error> {
         // 1) Expert-Query aus UI-Filtern bauen
         var terms: [String] = []
@@ -43,15 +43,16 @@ final class APIClient {
             terms.append("text:\(text)")
         }
 
-        let q = terms.isEmpty
+        let expert = terms.isEmpty
             ? "type:contract-notice OR type:contract-award"
             : terms.joined(separator: " AND ")
 
-        // 2) Body minimal halten (manche Gateways reagieren empfindlich auf 'fields')
+        // 2) TED erwartet "expertQuery" statt "q"
         let body: [String: Any] = [
-            "q": q,
+            "expertQuery": expert,
             "page": 1,
-            "limit": 25
+            "limit": 25,
+            "fields": ["id","title","publicationDate","buyerCountry","links.pdf","links.html"]
         ]
 
         guard let url = URL(string: "https://api.ted.europa.eu/v3/notices/search") else {
@@ -63,10 +64,13 @@ final class APIClient {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue("TendersApp/1.0 (iOS)", forHTTPHeaderField: "User-Agent")
-        do { req.httpBody = try JSONSerialization.data(withJSONObject: body) }
-        catch { return Fail(error: error).eraseToAnyPublisher() }
 
-        // 3) Request & robustes Fehlerhandling
+        do {
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        } catch {
+            return Fail(error: error).eraseToAnyPublisher()
+        }
+
         return URLSession.shared.dataTaskPublisher(for: req)
             .tryMap { out in
                 guard let http = out.response as? HTTPURLResponse else {
@@ -101,7 +105,7 @@ final class APIClient {
             .eraseToAnyPublisher()
     }
 
-    /// Async/await-Wrapper, z. B. für SavedSearchManager
+    /// Async/await-Wrapper
     func asyncSearch(filters: SearchFilters) async throws -> [Tender] {
         try await withCheckedThrowingContinuation { cont in
             var cancellable: AnyCancellable?
@@ -110,7 +114,8 @@ final class APIClient {
                     receiveCompletion: { completion in
                         switch completion {
                         case .finished: break
-                        case .failure(let error): cont.resume(throwing: error)
+                        case .failure(let error):
+                            cont.resume(throwing: error)
                         }
                         _ = cancellable // keep alive bis completion
                     },
