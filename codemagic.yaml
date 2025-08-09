@@ -1,90 +1,94 @@
 workflows:
   ios_no_sign:
-    name: iOS (no signing) – XcodeGen
+    name: iOS (no signing)
+    instance_type: mac_mini_m1
     max_build_duration: 60
     environment:
-      xcode: 16.4
       groups:
-        - app-secrets   # enthält OPENAI_API_KEY (+ optional SERP_API_KEY/BING_API_KEY)
+        - app-secrets        # enthält OPENAI_API_KEY / SERP_API_KEY / BING_API_KEY
+      vars:
+        XCODE_SCHEME: TendersApp
+    cache:
+      cache_paths:
+        - $HOME/Library/Caches/Homebrew
+        - $HOME/Library/Developer/Xcode/DerivedData -> **/project.yml
     scripts:
       - name: Show macOS & Xcode
         script: |
-          xcodebuild -version
           sw_vers
+          xcodebuild -version
 
-      - name: Install XcodeGen and generate .xcodeproj
+      - name: Install XcodeGen (falls project.yml vorhanden)
+        script: |
+          set -e
+          if [ -f project.yml ]; then
+            brew install xcodegen || brew upgrade xcodegen || true
+          fi
+
+      - name: Generate Xcode project with XcodeGen
+        script: |
+          set -e
+          if [ -f project.yml ]; then
+            xcodegen generate
+          fi
+
+      - name: Locate Xcode project / workspace and scheme
         script: |
           set -euo pipefail
-          if ! command -v xcodegen >/dev/null 2>&1; then
-            brew update
-            brew install xcodegen
-          fi
-          if [ ! -f project.yml ]; then
-            echo "❌ project.yml not found in repo root."
+          shopt -s nullglob
+          PROJ=""
+          if compgen -G "*.xcworkspace" > /dev/null; then
+            PROJ="$(ls -1 *.xcworkspace | head -n1)"
+          elif compgen -G "*.xcodeproj" > /dev/null; then
+            PROJ="$(ls -1 *.xcodeproj | head -n1)"
+          else
+            echo "No .xcworkspace or .xcodeproj found in repository."
             exit 66
           fi
-          xcodegen generate
-          if [ ! -d "TendersApp.xcodeproj" ]; then
-            echo "❌ TendersApp.xcodeproj was not generated."
-            exit 66
-          fi
-          echo "export PROJECT_PATH='TendersApp.xcodeproj'" >> "$CM_ENV"
-          echo "export SCHEME='TendersApp'" >> "$CM_ENV"
-          echo "✅ Generated TendersApp.xcodeproj and scheme TendersApp"
+          echo "Found project: $PROJ (scheme: ${XCODE_SCHEME})"
+          # Für spätere Schritte persistent machen
+          echo "export PROJECT_PATH='$PROJ'" >> "$CM_ENV"
+          echo "export XCODE_SCHEME='${XCODE_SCHEME}'" >> "$CM_ENV"
 
       - name: Resolve Swift Package dependencies (if any)
         script: |
           set -euo pipefail
-          xcodebuild -resolvePackageDependencies -project "$PROJECT_PATH" -scheme "$SCHEME"
-
-      - name: Write API keys into Info.plist of the app target
-        script: |
-          set -euo pipefail
-          SETTINGS=$(xcodebuild -showBuildSettings -project "$PROJECT_PATH" -scheme "$SCHEME" -configuration Release)
-          INFOPLIST_FILE=$(echo "$SETTINGS" | awk -F' = ' '/ INFOPLIST_FILE /{print $2; exit}')
-          if [ -z "$INFOPLIST_FILE" ]; then
-            echo "❌ Could not determine INFOPLIST_FILE"
-            exit 1
-          fi
-          PLIST_PATH="$INFOPLIST_FILE"
-          if [ ! -f "$PLIST_PATH" ]; then
-            # falls relativ zum Projektordner
-            PROJ_DIR=$(dirname "$PROJECT_PATH")
-            if [ -f "$PROJ_DIR/$INFOPLIST_FILE" ]; then
-              PLIST_PATH="$PROJ_DIR/$INFOPLIST_FILE"
+          source "$CM_ENV" || true
+          PROJ="${PROJECT_PATH:-}"
+          if [ -z "$PROJ" ]; then
+            if compgen -G "*.xcworkspace" > /dev/null; then
+              PROJ="$(ls -1 *.xcworkspace | head -n1)"
+            else
+              PROJ="$(ls -1 *.xcodeproj | head -n1)"
             fi
           fi
-          if [ ! -f "$PLIST_PATH" ]; then
-            echo "❌ Info.plist not found at: $INFOPLIST_FILE"
-            exit 1
-          fi
-          echo "✅ Using Info.plist: $PLIST_PATH"
-
-          /usr/libexec/PlistBuddy -c "Delete :OPENAI_API_KEY" "$PLIST_PATH" || true
-          /usr/libexec/PlistBuddy -c "Add :OPENAI_API_KEY string $OPENAI_API_KEY" "$PLIST_PATH"
-
-          if [ -n "${SERP_API_KEY:-}" ]; then
-            /usr/libexec/PlistBuddy -c "Delete :SERP_API_KEY" "$PLIST_PATH" || true
-            /usr/libexec/PlistBuddy -c "Add :SERP_API_KEY string $SERP_API_KEY" "$PLIST_PATH"
+          echo "Using project: $PROJ"
+          if [[ "$PROJ" == *.xcworkspace ]]; then
+            xcodebuild -resolvePackageDependencies -workspace "$PROJ" -scheme "$XCODE_SCHEME"
+          else
+            xcodebuild -resolvePackageDependencies -project "$PROJ" -scheme "$XCODE_SCHEME"
           fi
 
-          if [ -n "${BING_API_KEY:-}" ]; then
-            /usr/libexec/PlistBuddy -c "Delete :BING_API_KEY" "$PLIST_PATH" || true
-            /usr/libexec/PlistBuddy -c "Add :BING_API_KEY string $BING_API_KEY" "$PLIST_PATH"
-          fi
-
-      - name: Build iOS (no code signing)
+      - name: Build (no code signing)
         script: |
           set -euo pipefail
-          xcodebuild \
-            -project "$PROJECT_PATH" \
-            -scheme "$SCHEME" \
-            -configuration Release \
-            -sdk iphoneos \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-            build
+          source "$CM_ENV" || true
+          PROJ="${PROJECT_PATH:-}"
+          if [ -z "$PROJ" ]; then
+            if compgen -G "*.xcworkspace" > /dev/null; then
+              PROJ="$(ls -1 *.xcworkspace | head -n1)"
+            else
+              PROJ="$(ls -1 *.xcodeproj | head -n1)"
+            fi
+          fi
+          if [[ "$PROJ" == *.xcworkspace ]]; then
+            xcodebuild -workspace "$PROJ" -scheme "$XCODE_SCHEME" -configuration Release -sdk iphoneos CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+          else
+            xcodebuild -project "$PROJ" -scheme "$XCODE_SCHEME" -configuration Release -sdk iphoneos CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+          fi
 
     artifacts:
       - DerivedData/Build/Products/Release-iphoneos/*.app
-      - $CM_BUILD_DIR/ResultBundle_*.xcresult
-
+      - DerivedData/Build/Products/Release-iphoneos/*.ipa
+      - DerivedData/**/Build/Intermediates.noindex/**/*.xcactivitylog
+      - $CM_ENV
