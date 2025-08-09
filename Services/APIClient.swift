@@ -1,55 +1,73 @@
 import Foundation
 import Combine
 
-/// A simple HTTP client used to talk to the backend.  Encodes
-/// `SearchFilters` into JSON and decodes an array of `Tender` from the
-/// response.  Dates are decoded as ISO8601.
-@MainActor
+/// Einfacher HTTP-Client für die Suche.
+/// - Encodiert `SearchFilters` als JSON
+/// - Decodiert `[Tender]` aus der Antwort
+/// - Datumsformat: ISO8601
 final class APIClient {
+
     static let shared = APIClient()
-    /// The base URL of the backend.  Adjust this when running against
-    /// a remote server or simulator.
+
+    /// Basis-URL deines Backends (für lokale Tests ggf. anpassen)
     var baseURL = URL(string: "http://localhost:8000")!
+
     private let session: URLSession
+
     private init() {
-        session = URLSession(configuration: .default)
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 60
+        self.session = URLSession(configuration: config)
     }
-    /// Performs a search using Combine.  This method is preserved for
-    /// compatibility with existing code and returns a publisher.  New
-    /// clients should prefer `asyncSearch` instead.
-    func search(filters: SearchFilters) -> AnyPublisher<[Tender], Error> {
+
+    // MARK: - Helpers
+
+    private func jsonEncoder() -> JSONEncoder {
+        let enc = JSONEncoder()
+        enc.dateEncodingStrategy = .iso8601
+        return enc
+    }
+
+    private func jsonDecoder() -> JSONDecoder {
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .iso8601
+        return dec
+    }
+
+    private func makeSearchRequest(for filters: SearchFilters) throws -> URLRequest {
         var request = URLRequest(url: baseURL.appendingPathComponent("/search"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try jsonEncoder().encode(filters)
+        return request
+    }
+
+    // MARK: - Combine (bestehende Aufrufer bleiben kompatibel)
+
+    /// Combine-Variante. Für neue Aufrufer lieber `asyncSearch` nutzen.
+    func search(filters: SearchFilters) -> AnyPublisher<[Tender], Error> {
         do {
-            request.httpBody = try JSONEncoder().encode(filters)
+            let request = try makeSearchRequest(for: filters)
+            return session.dataTaskPublisher(for: request)
+                .tryMap { output -> [Tender] in
+                    try self.jsonDecoder().decode([Tender].self, from: output.data)
+                }
+                // Ergebnisse am Main-Thread liefern, damit UI sicher aktualisiert
+                .receive(on: DispatchQueue.main)
+                .eraseToAnyPublisher()
         } catch {
             return Fail(error: error).eraseToAnyPublisher()
         }
-        return session.dataTaskPublisher(for: request)
-            .map { $0.data }
-            .tryMap { data -> [Tender] in
-                let decoder = JSONDecoder()
-                decoder.dateDecodingStrategy = .iso8601
-                return try decoder.decode([Tender].self, from: data)
-            }
-            .receive(on: DispatchQueue.main)
-            .eraseToAnyPublisher()
     }
 
-    /// Performs a search using Swift's async/await concurrency model.
-    /// This method should be preferred by new code as it simplifies
-    /// error handling and call sites.  It returns an array of
-    /// `Tender` on success or throws an error if the network call
-    /// fails or decoding fails.
+    // MARK: - async/await (empfohlen)
+
+    /// Moderne Async/Await-Variante.
+    /// Wirft Fehler bei Netzwerk-/Decode-Problemen.
     func asyncSearch(filters: SearchFilters) async throws -> [Tender] {
-        var request = URLRequest(url: baseURL.appendingPathComponent("/search"))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(filters)
+        let request = try makeSearchRequest(for: filters)
         let (data, _) = try await session.data(for: request)
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode([Tender].self, from: data)
+        return try jsonDecoder().decode([Tender].self, from: data)
     }
 }
