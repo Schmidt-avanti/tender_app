@@ -1,45 +1,29 @@
 import SwiftUI
 
+/// Container mit Tabs (ohne Favoriten-Tab).
 struct RootView: View {
     @StateObject private var searchVM = SearchViewModel()
-    @EnvironmentObject private var favs: FavoritesManager
     @EnvironmentObject private var savedSearches: SavedSearchManager
     @EnvironmentObject private var bidManager: BidManager
 
     var body: some View {
-        ZStack {
-            // Vollflächiger Hintergrund gegen Letterboxing
-            Color(.systemBackground).ignoresSafeArea()
+        TabView {
+            SearchView(viewModel: searchVM)
+                .tabItem { Label("Suchen", systemImage: "magnifyingglass") }
 
-            TabView {
-                SearchView(viewModel: searchVM)
-                    .tabItem { Label("Suchen", systemImage: "magnifyingglass") }
+            SavedSearchesView()
+                .tabItem { Label("Gespeichert", systemImage: "bookmark") }
 
-                SavedSearchesView()
-                    .tabItem { Label("Suchen", systemImage: "bookmark") }
+            BidListView()
+                .tabItem { Label("Bids", systemImage: "doc.plaintext") }
 
-                FavoritesView()
-                    .tabItem { Label("Favoriten", systemImage: "star.fill") }
-
-                BidListView()
-                    .tabItem { Label("Bids", systemImage: "doc.plaintext") }
-
-                StatsView(viewModel: searchVM)
-                    .tabItem { Label("Statistik", systemImage: "chart.bar") }
-            }
+            StatsView(viewModel: searchVM)
+                .tabItem { Label("Statistik", systemImage: "chart.bar") }
         }
-        .task {
-            // Erste Suche anstoßen, damit Stats/Favoriten Daten bekommen
+        .onAppear {
             if searchVM.results.isEmpty {
                 searchVM.runSearch()
             }
         }
     }
-}
-
-#Preview {
-    RootView()
-        .environmentObject(FavoritesManager.shared)
-        .environmentObject(SavedSearchManager.shared)
-        .environmentObject(BidManager.shared)
 }
