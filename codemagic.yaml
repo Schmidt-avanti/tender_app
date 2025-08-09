@@ -1,33 +1,41 @@
 workflows:
-  ios-release:
-    name: iOS Release (Sideloadly friendly)
-    max_build_duration: 60
+  ios_no_sign:
+    name: iOS Build (no signing)
     environment:
+      xcode: latest
       vars:
-        XCODE_WORKSPACE: "TendersApp.xcodeproj"
-        XCODE_SCHEME: "TendersApp"
-      groups:
-        - ios_credentials
+        OPENAI_API_KEY: Encrypted(…)
+        SERP_API_KEY: Encrypted(…) # oder BING_API_KEY
     scripts:
-      - name: Set API keys as environment for build
+      - name: Clean
         script: |
-          echo "OPENAI_API_KEY set? ${OPENAI_API_KEY:+yes}" 
-          echo "SERP_API_KEY set? ${SERP_API_KEY:+yes}" 
-          echo "BING_API_KEY set? ${BING_API_KEY:+yes}" 
-      - name: Build iOS (no signing)
+          rm -rf DerivedData
+      - name: Resolve Swift Packages
         script: |
-          xcodebuild -project "$XCODE_WORKSPACE" -scheme "$XCODE_SCHEME" -configuration Release -sdk iphoneos CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+          xcodebuild \
+            -project TenderSmartApp.xcodeproj \
+            -scheme TenderSmartApp \
+            -resolvePackageDependencies
+      - name: Build Release (no signing)
+        script: |
+          xcodebuild \
+            -project TenderSmartApp.xcodeproj \
+            -scheme TenderSmartApp \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath DerivedData \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            build
+      - name: Package .ipa for Sideloadly
+        script: |
+          APP_PATH=$(find DerivedData/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            echo "App (.app) nicht gefunden" && exit 1
+          fi
+          rm -rf Payload TenderSmartApp.ipa
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          zip -r TenderSmartApp.ipa Payload
     artifacts:
-      - DerivedData/**/Build/Products/Release-iphoneos/*.app
-    publishing:
-      scripts:
-        - name: Export .ipa for Sideloadly
-          script: |
-            mkdir -p artifacts
-            APP_PATH=$(find DerivedData -name "*.app" -type d | head -n 1)
-            if [ -d "$APP_PATH" ]; then
-              pushd "$(dirname "$APP_PATH")"
-              zip -r app.zip "$(basename "$APP_PATH")"
-              popd
-              mv "$(dirname "$APP_PATH")/app.zip" artifacts/TendersApp.ipa
-            fi
+      - TenderSmartApp.ipa
+      - DerivedData/Build/Products/Release-iphoneos/*.app
