@@ -1,35 +1,44 @@
 name: TendersApp
-
 options:
-  developmentLanguage: de
-  bundleIdPrefix: com.aaron.schmidt    # <— ggf. ändern
+  minimumXcodeGenVersion: 2.38.0
+  deploymentTarget:
+    iOS: "16.0"
+
+settings:
+  base:
+    PRODUCT_BUNDLE_IDENTIFIER: com.aaron.schmidt.tenders
+    SWIFT_VERSION: 5.0
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Manual
+    INFOPLIST_FILE: Info.plist
+    ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    TARGETED_DEVICE_FAMILY: "1,2"   # iPhone + iPad (Fullscreen auf modernen Geräten)
 
 targets:
   TendersApp:
     type: application
     platform: iOS
-    deploymentTarget: "16.0"
     sources:
       - path: .
         excludes:
-          - DerivedData
-          - build
-          - .build
-          - README.md
           - codemagic.yaml
           - project.yml
+          - README.md
+          - .gitignore
     resources:
-      - Assets.xcassets                 # <— existiert bei dir
-      - LaunchScreen.storyboard         # <— falls du keinen LaunchScreen hast: Zeile löschen
-    info:
-      path: Info.plist                  # <— Pfad prüfen
+      - Assets.xcassets
+      - LaunchScreen.storyboard
     settings:
-      PRODUCT_NAME: TendersApp
-      PRODUCT_BUNDLE_IDENTIFIER: com.aaron.schmidt.tenders   # <— ggf. ändern
-      SWIFT_VERSION: 5.10
-      CODE_SIGN_STYLE: Manual
-      DEVELOPMENT_TEAM: ""
-      ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-      IPHONEOS_DEPLOYMENT_TARGET: 16.0
-    scheme:
-      testTargets: []
+      base:
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 1.0.0
+
+schemes:
+  TendersApp:
+    build:
+      targets:
+        TendersApp: all
+    run:
+      config: Release
+    archive:
+      config: Release
