@@ -3,7 +3,7 @@ workflows:
     name: Build unsigned IPA (for Sideloadly)
     max_build_duration: 60
     environment:
-      xcode: 15.4
+      xcode: 16.0
       vars:
         SCHEME: TendersApp
         BUNDLE_ID: com.aaron.schmidt.tenders
