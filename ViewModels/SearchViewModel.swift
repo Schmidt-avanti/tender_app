@@ -12,15 +12,27 @@ final class SearchViewModel: ObservableObject {
     private let fetcher = PageFetcher()
     private let extractor = TenderExtractor()
 
+    // Liest Key erst aus Env, dann aus Info.plist
+    private func key(_ name: String) -> String? {
+        if let v = ProcessInfo.processInfo.environment[name], !v.isEmpty { return v }
+        if let v = Bundle.main.object(forInfoDictionaryKey: name) as? String, !v.isEmpty { return v }
+        return nil
+    }
+
     init(provider: SearchProvider? = nil) {
-        if let serpKey = ProcessInfo.processInfo.environment["SERP_API_KEY"], !serpKey.isEmpty {
-            self.provider = SerpAPIProvider(apiKey: serpKey)
-        } else if let bingKey = ProcessInfo.processInfo.environment["BING_API_KEY"], !bingKey.isEmpty {
-            self.provider = BingWebSearchProvider(apiKey: bingKey)
+        if let provider {
+            self.provider = provider
+            return
+        }
+
+        if let serp = key("SERP_API_KEY") {
+            self.provider = SerpAPIProvider(apiKey: serp)
+        } else if let bing = key("BING_API_KEY") {
+            self.provider = BingWebSearchProvider(apiKey: bing)
         } else if !AppSecrets.serpApiKey.isEmpty {
-            self.provider = SerpAPIProvider()
+            self.provider = SerpAPIProvider(apiKey: AppSecrets.serpApiKey)
         } else if !AppSecrets.bingApiKey.isEmpty {
-            self.provider = BingWebSearchProvider()
+            self.provider = BingWebSearchProvider(apiKey: AppSecrets.bingApiKey)
         } else {
             self.provider = LocalMockSearchProvider()
         }
@@ -42,6 +54,7 @@ final class SearchViewModel: ObservableObject {
         do {
             let urls = try await provider.search(query: expandedQuery, limit: 5)
             var found: [Tender] = []
+
             for url in urls {
                 do {
                     let text = try await fetcher.fetchPlainText(from: url)
@@ -49,16 +62,16 @@ final class SearchViewModel: ObservableObject {
                         found.append(t)
                     }
                 } catch {
-                    // ignore per-URL errors
+                    // Einzelne URL-Fehler ignorieren
                 }
             }
-            if found.isEmpty && provider is LocalMockSearchProvider {
+
+            if found.isEmpty, provider is LocalMockSearchProvider, query.trimmingCharacters(in: .whitespaces).isEmpty {
                 found = [Tender.mock]
             }
+
             results = found
-            if results.isEmpty {
-                errorMessage = "Keine passenden Ausschreibungen gefunden."
-            }
+            if results.isEmpty { errorMessage = "Keine passenden Ausschreibungen gefunden." }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -66,8 +79,9 @@ final class SearchViewModel: ObservableObject {
 
     private func expandQuery(_ q: String) async throws -> String {
         let sys = "Du verbesserst Suchanfragen für öffentliche Ausschreibungen. Antworte NUR mit der finalen Suchphrase."
-        let user = "Verbessere folgende Suchanfrage für relevante EU-/DACH-Ausschreibungen (keine Werbung, nur seriöse Quellen): \"\(q)\". Nutze deutschsprachige Keywords + CPV-ähnliche Begriffe."
+        let user = "Verbessere folgende Suchanfrage für relevante EU-/DACH-Ausschreibungen (keine Werbung, nur seriöse Quellen): \"\(q)\". Nutze deutschsprachige Keywords und CPV-ähnliche Begriffe."
         let out = try await openai.complete(systemPrompt: sys, userPrompt: user, model: .gpt4oMini, temperature: 0.2)
         return out.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
+
