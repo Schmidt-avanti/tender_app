@@ -5,7 +5,7 @@ workflows:
     environment:
       xcode: 16.4
       groups:
-        - app-secrets     # <- Lege diese Gruppe in Codemagic an (z.B. OPENAI_API_KEY)
+        - app-secrets   # optional; lege diese Gruppe in Codemagic an, z.B. OPENAI_API_KEY
       vars:
         CONFIGURATION: Release
 
@@ -15,13 +15,29 @@ workflows:
           sw_vers
           xcodebuild -version
 
-      - name: Locate Xcode project / workspace and scheme
+      - name: Locate project/workspace (or generate with XcodeGen)
         script: |
           set -euo pipefail
 
-          # 1) Projektdatei finden (.xcworkspace bevorzugt, sonst .xcodeproj)
-          WORKSPACE_FILE=$(find . -maxdepth 4 -type d -name "*.xcworkspace" | head -n 1 || true)
-          PROJECT_FILE=$(find . -maxdepth 4 -type d -name "*.xcodeproj" | head -n 1 || true)
+          find_xcproj() {
+            WORKSPACE_FILE=$(find . -maxdepth 6 -type d -name "*.xcworkspace" | head -n 1 || true)
+            PROJECT_FILE=$(find . -maxdepth 6 -type d -name "*.xcodeproj"    | head -n 1 || true)
+          }
+
+          find_xcproj
+
+          if [[ -z "${WORKSPACE_FILE}" && -z "${PROJECT_FILE}" ]]; then
+            echo "No .xcworkspace or .xcodeproj found. Trying to generate with XcodeGen…"
+            # Install XcodeGen
+            brew install xcodegen
+            if [[ ! -f project.yml ]]; then
+              echo "❌ project.yml not found in repo root. Please add it (see README)."
+              exit 66
+            fi
+            xcodegen generate
+            # Re-scan after generation
+            find_xcproj
+          fi
 
           if [[ -n "${WORKSPACE_FILE}" ]]; then
             echo "Using workspace: ${WORKSPACE_FILE}"
@@ -32,11 +48,11 @@ workflows:
             BUILD_REF="project"
             BUILD_FILE="${PROJECT_FILE}"
           else
-            echo "❌ No .xcworkspace or .xcodeproj found in repository."
+            echo "❌ Still no .xcworkspace or .xcodeproj found in repository."
             exit 66
           fi
 
-          # 2) Scheme herausfinden (erstes verfügbares Scheme)
+          # Detect first shared scheme
           if [[ "${BUILD_REF}" == "workspace" ]]; then
             SCHEMES=$(xcodebuild -list -json -workspace "${BUILD_FILE}" 2>/dev/null | /usr/bin/python3 -c 'import sys,json;print("\n".join(json.load(sys.stdin)["workspace"]["schemes"]))')
           else
@@ -44,17 +60,16 @@ workflows:
           fi
 
           if [[ -z "${SCHEMES}" ]]; then
-            echo "❌ No schemes found. Please make sure your scheme is shared in Xcode."
+            echo "❌ No schemes found. Make sure your scheme is Shared (or let XcodeGen create one)."
             exit 67
           fi
 
           SCHEME=$(echo "${SCHEMES}" | head -n 1)
           echo "Detected scheme: ${SCHEME}"
 
-          # 3) Für spätere Steps speichern
           echo "BUILD_REF=${BUILD_REF}" >> $CM_ENV
           echo "BUILD_FILE=${BUILD_FILE}" >> $CM_ENV
-          echo "SCHEME=${SCHEME}" >> $CM_ENV
+          echo "SCHEME=${SCHEME}"       >> $CM_ENV
 
       - name: Clean
         script: |
@@ -108,7 +123,8 @@ workflows:
     publishing:
       email:
         recipients:
-          - aaron.schmidt.consulting@gmail.com
+          - your@email.tld
         notify:
           success: false
           failure: true
+
