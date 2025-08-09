@@ -19,6 +19,8 @@ targets:
       - path: Info.plist
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.aaron.schmidt.tenders
+      PRODUCT_NAME: TendersApp
+      EXECUTABLE_NAME: TendersApp
       INFOPLIST_FILE: Info.plist
       CURRENT_PROJECT_VERSION: 1
       MARKETING_VERSION: 1.0
