@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Haupt-Suchbildschirm.
-/// Zeigt Trefferliste, erlaubt Filtern und Speichern der Suche.
+/// Haupt-Suchbildschirm: Trefferliste mit Titel + Veröffentlicht/Abgabe/Land.
+/// Favoriten sind vorerst deaktiviert, damit der Build stabil läuft.
 struct SearchView: View {
     @ObservedObject var viewModel: SearchViewModel
 
@@ -9,7 +9,6 @@ struct SearchView: View {
     @State private var showingSaveSheet: Bool = false
     @State private var saveSearchName: String = ""
 
-    @EnvironmentObject private var favs: FavoritesManager
     @EnvironmentObject private var savedSearches: SavedSearchManager
 
     var body: some View {
@@ -25,9 +24,12 @@ struct SearchView: View {
                         Text(msg)
                             .multilineTextAlignment(.center)
                             .foregroundColor(.secondary)
-                        PrimaryButton(title: "Erneut versuchen") {
+                        Button {
                             viewModel.runSearch()
+                        } label: {
+                            Label("Erneut versuchen", systemImage: "arrow.clockwise")
                         }
+                        .buttonStyle(.borderedProminent)
                     }
                     .padding()
                 } else if viewModel.results.isEmpty {
@@ -42,7 +44,7 @@ struct SearchView: View {
                     .padding()
                 } else {
                     List {
-                        // WICHTIG: id: \.id zwingt die richtige ForEach-Variante
+                        // WICHTIG: id: \.id => vermeidet die Binding-ForEach-Variante
                         ForEach(viewModel.rankedResults, id: \.id) { tender in
                             NavigationLink(
                                 destination: TenderDetailView(tender: tender)
@@ -69,21 +71,7 @@ struct SearchView: View {
                                             }
                                         }
                                     }
-
                                     Spacer(minLength: 8)
-
-                                    Button {
-                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-                                            favs.toggle(tender: tender)
-                                        }
-                                    } label: {
-                                        Image(systemName: favs.isFavorite(id: tender.id) ? "star.fill" : "star")
-                                            .foregroundColor(.yellow)
-                                            .font(.title3)
-                                            .scaleEffect(favs.isFavorite(id: tender.id) ? 1.2 : 1.0)
-                                            .accessibilityLabel(favs.isFavorite(id: tender.id) ? "Als Favorit markiert" : "Als Favorit markieren")
-                                    }
-                                    .buttonStyle(.plain)
                                 }
                                 .padding(.vertical, 6)
                             }
@@ -171,3 +159,4 @@ struct SearchView: View {
         }
     }
 }
+
