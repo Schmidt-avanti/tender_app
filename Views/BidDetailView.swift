@@ -1,166 +1,77 @@
 import SwiftUI
 
-/// Provides a detailed view for a single bid.  Users can update the
-/// bid's status, manage the list of tasks, mark tasks as complete,
-/// and add comments.  All changes are persisted via the
-/// `BidManager`.
+/// Detailansicht für ein Bid (ohne Favorites-Bezug).
 struct BidDetailView: View {
-    @EnvironmentObject private var bidManager: BidManager
-    @EnvironmentObject private var favs: FavoritesManager
-    @State private var bid: Bid
-    @State private var newTaskTitle: String = ""
-    @State private var newTaskDescription: String = ""
-    @State private var newCommentText: String = ""
-    @State private var showAddTask: Bool = false
-    @State private var showAddComment: Bool = false
+    let bid: Bid
 
-    init(bid: Bid) {
-        // copy for editing; will sync back via update()
-        _bid = State(initialValue: bid)
-    }
+    @EnvironmentObject private var bidManager: BidManager
 
     var body: some View {
-        Form {
-            Section(header: Text("Ausschreibung")) {
-                Text(bid.tender.title)
-                    .font(.headline)
-                if let buyer = bid.tender.buyer {
-                    Text("Auftraggeber: \(buyer)")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+
+                // Tender-Kopf
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(bid.tender.title)
+                        .font(.title.bold())
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(bid.tender.subtitleLine)
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
-            }
-            Section(header: Text("Status")) {
-                Picker("Status", selection: $bid.status) {
-                    ForEach(BidStatus.allCases, id: \.self) { status in
-                        Text(status.rawValue).tag(status)
+
+                Divider()
+
+                // Bid-Infos (minimal – passe an deinen Bid später an)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Status: \(bid.status.rawValue.capitalized)")
+                    Text("Erstellt: \(bid.createdAt.formatted(date: .abbreviated, time: .shortened))")
+                }
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+                if let url = bid.tender.url {
+                    Link(destination: url) {
+                        Label("Zur Ausschreibung", systemImage: "link")
                     }
+                    .buttonStyle(.bordered)
                 }
-                .pickerStyle(.segmented)
+
+                Spacer(minLength: 12)
             }
-            Section(header: Text("Aufgaben")) {
-                ForEach($bid.tasks) { $task in
-                    HStack {
-                        Button(action: {
-                            task.isCompleted.toggle()
-                        }) {
-                            Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle")
-                                .foregroundColor(task.isCompleted ? .green : .gray)
-                        }
-                        .buttonStyle(.plain)
-                        VStack(alignment: .leading) {
-                            Text(task.title)
-                            if let desc = task.description {
-                                Text(desc)
-                                    .font(.footnote)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-                }
-                .onDelete { offsets in
-                    bid.tasks.remove(atOffsets: offsets)
-                }
-                Button(action: { showAddTask = true }) {
-                    Label("Aufgabe hinzufügen", systemImage: "plus")
-                }
-            }
-            Section(header: Text("Kommentare")) {
-                ForEach(bid.comments) { comment in
-                    VStack(alignment: .leading) {
-                        HStack {
-                            Text(comment.author)
-                                .font(.subheadline)
-                                .bold()
-                            Spacer()
-                            Text(comment.createdAt, style: .time)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        Text(comment.message)
-                    }
-                }
-                Button(action: { showAddComment = true }) {
-                    Label("Kommentar hinzufügen", systemImage: "plus.bubble")
-                }
-            }
+            .padding()
         }
-        .navigationTitle("Bid Details")
+        .navigationTitle("Bid")
         .navigationBarTitleDisplayMode(.inline)
-        .onDisappear {
-            // persist changes when leaving the screen
-            bidManager.update(bid: bid)
-        }
-        .sheet(isPresented: $showAddTask) {
-            NavigationStack {
-                Form {
-                    Section(header: Text("Titel")) {
-                        TextField("Task", text: $newTaskTitle)
-                    }
-                    Section(header: Text("Beschreibung")) {
-                        TextEditor(text: $newTaskDescription)
-                            .frame(height: 100)
-                    }
-                }
-                .navigationTitle("Neue Aufgabe")
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Hinzufügen") {
-                            let task = BidTask(title: newTaskTitle, isCompleted: false, description: newTaskDescription.isEmpty ? nil : newTaskDescription)
-                            bid.tasks.append(task)
-                            newTaskTitle = ""
-                            newTaskDescription = ""
-                            showAddTask = false
-                        }
-                    }
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Abbrechen") {
-                            newTaskTitle = ""
-                            newTaskDescription = ""
-                            showAddTask = false
-                        }
-                    }
-                }
-            }
-        }
-        .sheet(isPresented: $showAddComment) {
-            NavigationStack {
-                Form {
-                    Section(header: Text("Nachricht")) {
-                        TextEditor(text: $newCommentText)
-                            .frame(height: 150)
-                    }
-                }
-                .navigationTitle("Neuer Kommentar")
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Hinzufügen") {
-                            let comment = BidComment(author: "Ich", message: newCommentText)
-                            bid.comments.append(comment)
-                            newCommentText = ""
-                            showAddComment = false
-                        }
-                    }
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Abbrechen") {
-                            newCommentText = ""
-                            showAddComment = false
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 
-struct BidDetailView_Previews: PreviewProvider {
-    static var previews: some View {
-        let tender = Tender(id: "1", source: "demo", title: "Sample", buyer: "City", cpv: ["123456"], country: "DE", city: "Berlin", deadline: Date(), valueEstimate: 1000, url: nil)
-        let bid = Bid(tender: tender)
-        return NavigationStack {
-            BidDetailView(bid: bid)
-        }
-        .environmentObject(BidManager.shared)
-        .environmentObject(FavoritesManager.shared)
+// MARK: - Preview (ohne FavoritesManager)
+#Preview {
+    let sampleTender = Tender(
+        id: "demo",
+        source: "TED",
+        title: "Beispiel-Ausschreibung",
+        buyer: "Musterstadt",
+        cpv: ["79530000"],
+        country: "DE",
+        city: "Berlin",
+        deadline: Calendar.current.date(byAdding: .day, value: 10, to: Date()),
+        publishedAt: Date(),
+        valueEstimate: 100000,
+        url: URL(string: "https://ted.europa.eu")
+    )
+
+    let sampleBid = Bid(
+        id: "bid-1",
+        tender: sampleTender,
+        createdAt: Date(),
+        status: .draft
+    )
+
+    return NavigationStack {
+        BidDetailView(bid: sampleBid)
+            .environmentObject(BidManager.shared)
     }
 }
