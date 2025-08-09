@@ -41,73 +41,67 @@ struct SearchView: View {
                     }
                     .padding()
                 } else {
-                    List(viewModel.rankedResults) { tender in
-                        NavigationLink(value: tender) {
-                            HStack(alignment: .top, spacing: 12) {
-                                // Inhalt links
-                                VStack(alignment: .leading, spacing: 6) {
-                                    // Titel
-                                    Text(tender.title)
-                                        .font(.headline)
-                                        .foregroundColor(.primary)
-                                        .lineLimit(2)
+                    List {
+                        ForEach(viewModel.rankedResults) { tender in
+                            NavigationLink(
+                                destination: TenderDetailView(tender: tender)
+                            ) {
+                                HStack(alignment: .top, spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text(tender.title)
+                                            .font(.headline)
+                                            .foregroundColor(.primary)
+                                            .lineLimit(2)
 
-                                    // Unterzeile: Veröffentlicht / Abgabe / Land
-                                    Text(tender.subtitleLine)
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(1)
+                                        Text(tender.subtitleLine)
+                                            .font(.subheadline)
+                                            .foregroundColor(.secondary)
+                                            .lineLimit(1)
 
-                                    // CPV-Chips (optional)
-                                    if !tender.cpv.isEmpty {
-                                        ScrollView(.horizontal, showsIndicators: false) {
-                                            HStack(spacing: 8) {
-                                                ForEach(tender.cpv, id: \.self) { code in
-                                                    Pill(text: code)
+                                        if !tender.cpv.isEmpty {
+                                            ScrollView(.horizontal, showsIndicators: false) {
+                                                HStack(spacing: 8) {
+                                                    ForEach(tender.cpv, id: \.self) { code in
+                                                        Pill(text: code)
+                                                    }
                                                 }
                                             }
                                         }
                                     }
-                                }
 
-                                Spacer(minLength: 8)
+                                    Spacer(minLength: 8)
 
-                                // Favoritenstern rechts
-                                Button {
-                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-                                        favs.toggle(tender: tender)
+                                    Button {
+                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                                            favs.toggle(tender: tender)
+                                        }
+                                    } label: {
+                                        Image(systemName: favs.isFavorite(id: tender.id) ? "star.fill" : "star")
+                                            .foregroundColor(.yellow)
+                                            .font(.title3)
+                                            .scaleEffect(favs.isFavorite(id: tender.id) ? 1.2 : 1.0)
+                                            .accessibilityLabel(favs.isFavorite(id: tender.id) ? "Als Favorit markiert" : "Als Favorit markieren")
                                     }
-                                } label: {
-                                    Image(systemName: favs.isFavorite(id: tender.id) ? "star.fill" : "star")
-                                        .foregroundColor(.yellow)
-                                        .font(.title3)
-                                        .scaleEffect(favs.isFavorite(id: tender.id) ? 1.2 : 1.0)
-                                        .accessibilityLabel(favs.isFavorite(id: tender.id) ? "Als Favorit markiert" : "Als Favorit markieren")
+                                    .buttonStyle(.plain)
                                 }
-                                .buttonStyle(.plain)
+                                .padding(.vertical, 6)
                             }
-                            .padding(.vertical, 6)
                         }
                     }
                     .listStyle(.plain)
-                    .refreshable { viewModel.runSearch() } // Pull-to-Refresh
+                    .refreshable { viewModel.runSearch() }
                 }
             }
             .navigationTitle("Ausschreibungen")
-            .navigationDestination(for: Tender.self) { tender in
-                TenderDetailView(tender: tender)
-            }
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
-                    Button {
-                        viewModel.runSearch()
-                    } label: { Image(systemName: "magnifyingglass") }
-
-                    Button {
-                        showingFilters.toggle()
-                    } label: { Image(systemName: "line.3.horizontal.decrease.circle") }
+                    Button { viewModel.runSearch() } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    Button { showingFilters.toggle() } label: {
+                        Image(systemName: "line.3.horizontal.decrease.circle")
+                    }
                 }
-
                 ToolbarItem(placement: .automatic) {
                     Button {
                         saveSearchName = ""
@@ -170,7 +164,6 @@ struct SearchView: View {
             }
         }
         .onAppear {
-            // Beim ersten Öffnen automatisch suchen
             if viewModel.results.isEmpty && !viewModel.isLoading {
                 viewModel.runSearch()
             }
