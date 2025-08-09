@@ -70,7 +70,7 @@ struct BidDetailView: View {
         status: .draft
     )
 
-    return NavigationStack {
+    NavigationStack {
         BidDetailView(bid: sampleBid)
             .environmentObject(BidManager.shared)
     }
