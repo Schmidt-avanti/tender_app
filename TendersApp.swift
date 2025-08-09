@@ -1,14 +1,14 @@
 import SwiftUI
 import UserNotifications
 
-/// The entry point for the second version of the Tenders app.  It
-/// uses a tabbed interface to separate search, favourites and
-/// statistics into dedicated screens.
+/// App-Entry für die TendersApp.
+/// Injiziert die benötigten EnvironmentObjects und fragt Notification-Rechte an.
 @main
 struct TendersAppV2: App {
     @StateObject private var favs = FavoritesManager.shared
     @StateObject private var savedSearches = SavedSearchManager.shared
     @StateObject private var bidManager = BidManager.shared
+
     var body: some Scene {
         WindowGroup {
             RootView()
@@ -16,7 +16,7 @@ struct TendersAppV2: App {
                 .environmentObject(savedSearches)
                 .environmentObject(bidManager)
                 .onAppear {
-                    // Request notification permission when the app starts
+                    // Benachrichtigungsberechtigung einmalig anfragen
                     NotificationManager.shared.requestPermission()
                 }
         }
