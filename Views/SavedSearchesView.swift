@@ -1,138 +1,66 @@
 import SwiftUI
 
-/// Displays the user's saved searches.  Allows creating new saved
-/// searches based on the current filters and running a search to
-/// populate results.  Uses the `SavedSearchManager` environment
-/// object to persist data and `SearchViewModel` to perform the
-/// search when a saved search is selected.  The view is structured
-/// as a simple list for clarity.
+/// Gespeicherte Suchen (ohne Favorites-Bezug).
 struct SavedSearchesView: View {
     @EnvironmentObject private var savedSearches: SavedSearchManager
-    @StateObject private var searchVM = SearchViewModel()
-    @State private var showingAddSheet: Bool = false
-    @State private var newSearchName: String = ""
-    @State private var showResults: Bool = false
-    @State private var selectedResults: [Tender] = []
+    @State private var selected: SavedSearch?
 
     var body: some View {
         NavigationStack {
             List {
-                ForEach(savedSearches.searches) { search in
-                    Button(action: {
-                        Task {
-                            selectedResults = await savedSearches.execute(search: search)
-                            showResults = true
-                        }
-                    }) {
-                        VStack(alignment: .leading) {
-                            Text(search.name)
+                ForEach(savedSearches.items, id: \.id) { s in
+                    Button {
+                        selected = s
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(s.name)
                                 .font(.headline)
-                            Text("\(search.filters.cpv.count) CPV, \(search.filters.regions.count) Regionen")
+                            Text(summary(for: s))
                                 .font(.subheadline)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 6)
                     }
                 }
-                .onDelete { offsets in
-                    for index in offsets {
-                        let id = savedSearches.searches[index].id
-                        savedSearches.remove(id: id)
-                    }
-                }
+                .onDelete(perform: delete)
             }
-            .navigationTitle("Gespeicherte Suchen")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button(action: { showingAddSheet = true }) {
-                        Label("Neu", systemImage: "plus")
-                    }
-                }
-            }
-            .sheet(isPresented: $showingAddSheet) {
-                NavigationStack {
-                    Form {
-                        Section(header: Text("Name")) {
-                            TextField("z. B. Hotlines Berlin", text: $newSearchName)
-                        }
-                        Section(header: Text("Filter")) {
-                            // Use the same FilterSheet view to configure new searches
-                            FilterSheet(filters: $searchVM.filters) {
-                                // nothing
-                            }
-                            .frame(height: 400)
-                        }
-                    }
-                    .navigationTitle("Neue Suche")
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Speichern") {
-                                savedSearches.addSearch(name: newSearchName.isEmpty ? "Unbenannte Suche" : newSearchName, filters: searchVM.filters)
-                                newSearchName = ""
-                                searchVM.filters = SearchFilters()
-                                showingAddSheet = false
-                            }
-                        }
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Abbrechen") {
-                                newSearchName = ""
-                                searchVM.filters = SearchFilters()
-                                showingAddSheet = false
-                            }
-                        }
-                    }
-                }
-            }
-            .navigationDestination(isPresented: $showResults) {
-                ResultsListView(results: selectedResults)
+            .listStyle(.plain)
+            .navigationTitle("Gespeichert")
+            .sheet(item: $selected) { s in
+                SavedSearchRunnerView(search: s)
             }
         }
     }
+
+    private func delete(at offsets: IndexSet) {
+        for idx in offsets {
+            let s = savedSearches.items[idx]
+            savedSearches.remove(id: s.id)
+        }
+    }
+
+    private func summary(for s: SavedSearch) -> String {
+        var bits: [String] = []
+        if !s.filters.cpv.isEmpty { bits.append("CPV: \(s.filters.cpv.joined(separator: ", "))") }
+        if !s.filters.regions.isEmpty { bits.append("Regionen: \(s.filters.regions.joined(separator: ", "))") }
+        if !s.filters.freeText.isEmpty { bits.append("Text: \(s.filters.freeText)") }
+        return bits.isEmpty ? "Keine Filter" : bits.joined(separator: " · ")
+    }
 }
 
-/// A helper view to present search results from a saved search.  This
-/// view reuses some of the styling from the main search view but
-/// operates independently so it can be pushed onto the navigation
-/// stack.
-private struct ResultsListView: View {
-    let results: [Tender]
-    @EnvironmentObject private var favs: FavoritesManager
+/// Einfache Runner-View, die eine gespeicherte Suche ausführt.
+private struct SavedSearchRunnerView: View {
+    let search: SavedSearch
+    @StateObject private var vm = SearchViewModel()
+
     var body: some View {
-        List(results) { tender in
-            NavigationLink(value: tender) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(tender.title)
-                            .font(.headline)
-                        if let buyer = tender.buyer {
-                            Text(buyer)
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    Spacer()
-                    Button(action: {
-                        withAnimation(.spring()) {
-                            favs.toggle(tender: tender)
-                        }
-                    }) {
-                        Image(systemName: favs.isFavorite(id: tender.id) ? "star.fill" : "star")
-                            .foregroundColor(.yellow)
-                    }
-                    .buttonStyle(.plain)
+        NavigationStack {
+            SearchView(viewModel: vm)
+                .onAppear {
+                    vm.filters = search.filters
+                    vm.runSearch()
                 }
-            }
         }
-        .navigationTitle("Ergebnisse")
-        .navigationDestination(for: Tender.self) { tender in
-            TenderDetailView(tender: tender)
-        }
-    }
-}
-
-struct SavedSearchesView_Previews: PreviewProvider {
-    static var previews: some View {
-        SavedSearchesView()
-            .environmentObject(SavedSearchManager.shared)
-            .environmentObject(FavoritesManager.shared)
     }
 }
