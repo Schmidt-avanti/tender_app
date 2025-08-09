@@ -5,36 +5,43 @@ workflows:
     environment:
       xcode: 16.4
       vars:
-        SCHEME: TendersApp           # <— ggf. anpassen
+        SCHEME: TendersApp        # ← ggf. auf dein Scheme ändern
         CONFIGURATION: Release
         DERIVED_DATA: $CM_BUILD_DIR/DerivedData
-    scripts:
-      - name: Prepare project (optionales XcodeGen)
-        script: |
-          set -euo pipefail
-          # Falls ein XcodeGen-Spec vorhanden ist, generieren
-          if [ -f project.yml ]; then
-            brew install xcodegen || true
-            xcodegen generate
-          fi
-          # .xcworkspace bevorzugen, sonst .xcodeproj
-          if ls -1 *.xcworkspace 1>/dev/null 2>&1; then
-            export CONTAINER=$(ls -1 *.xcworkspace | head -n1)
-            export PROJECT_FLAG="-workspace \"$CONTAINER\""
-          elif ls -1 *.xcodeproj 1>/dev/null 2>&1; then
-            export CONTAINER=$(ls -1 *.xcodeproj | head -n1)
-            export PROJECT_FLAG="-project \"$CONTAINER\""
-          else
-            echo "Kein .xcworkspace oder .xcodeproj gefunden."
-            exit 1
-          fi
-          echo "Nutze: $CONTAINER  |  Scheme: $SCHEME"
 
+    scripts:
       - name: Build (no signing)
         script: |
-          set -euo pipefail
-          # build, keine Signierung
-          eval xcodebuild $PROJECT_FLAG \
+          set -eo pipefail
+
+          # 1) Projekt/Workspace finden (oder mit XcodeGen erzeugen)
+          if ls -1 *.xcworkspace >/dev/null 2>&1; then
+            CONTAINER="$(ls -1 *.xcworkspace | head -n1)"
+            PROJECT_FLAG=( -workspace "$CONTAINER" )
+          elif ls -1 *.xcodeproj >/dev/null 2>&1; then
+            CONTAINER="$(ls -1 *.xcodeproj | head -n1)"
+            PROJECT_FLAG=( -project "$CONTAINER" )
+          elif [ -f project.yml ] || [ -f project.yaml ]; then
+            echo "Kein Xcode-Projekt gefunden – generiere mit XcodeGen…"
+            brew install xcodegen || true
+            xcodegen generate
+            CONTAINER="$(ls -1 *.xcodeproj | head -n1)"
+            PROJECT_FLAG=( -project "$CONTAINER" )
+          else
+            echo "❌ Kein .xcworkspace/.xcodeproj (und kein project.yml) im Repo gefunden."
+            exit 1
+          fi
+
+          echo "➡️  Baue: $CONTAINER | Scheme: $SCHEME"
+
+          # 2) (Optional) Packages auflösen – xcodebuild macht das beim Build ohnehin,
+          #     aber so sieht man früh Fehler:
+          xcodebuild "${PROJECT_FLAG[@]}" \
+            -scheme "$SCHEME" \
+            -resolvePackageDependencies
+
+          # 3) Build ohne Signierung
+          xcodebuild "${PROJECT_FLAG[@]}" \
             -scheme "$SCHEME" \
             -configuration "$CONFIGURATION" \
             -sdk iphoneos \
@@ -44,22 +51,27 @@ workflows:
 
       - name: Package unsigned .ipa
         script: |
-          set -euo pipefail
-          APP_PATH=$(find "$DERIVED_DATA/Build/Products/$CONFIGURATION-iphoneos" -type d -name "*.app" -print -quit)
-          test -n "$APP_PATH" || { echo "Keine .app gefunden"; exit 1; }
-          echo "App gefunden: $APP_PATH"
+          set -eo pipefail
+          APP_PATH="$(find "$DERIVED_DATA/Build/Products/$CONFIGURATION-iphoneos" -type d -name "*.app" -print -quit)"
+          if [ -z "$APP_PATH" ]; then
+            echo "❌ Keine .app in $DERIVED_DATA/Build/Products/$CONFIGURATION-iphoneos gefunden."
+            ls -R "$DERIVED_DATA/Build/Products" || true
+            exit 1
+          fi
+
+          echo "Gefundene App: $APP_PATH"
           rm -rf Payload
           mkdir -p Payload build/ipa
           cp -R "$APP_PATH" Payload/
-          IPA_NAME="TendersApp-unsigned-${CM_BUILD_ID}.ipa"
+          IPA_NAME="${SCHEME}-unsigned-${CM_BUILD_ID}.ipa"
           (zip -qry "build/ipa/$IPA_NAME" Payload)
           rm -rf Payload
-          ls -lah build/ipa
+          echo "✅ IPA erstellt: build/ipa/$IPA_NAME"
 
     artifacts:
       - build/ipa/*.ipa
       - $DERIVED_DATA/Build/Products/$CONFIGURATION-iphoneos/*.app
-      - $DERIVED_DATA/Logs/**/*.log
+      - $CM_BUILD_DIR/**/Build/**/*.log
 
     publishing:
       email:
@@ -68,4 +80,3 @@ workflows:
         notify:
           success: true
           failure: true
-
