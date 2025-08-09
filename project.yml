@@ -8,6 +8,9 @@ targets:
     deploymentTarget: "16.0"
     sources:
       - path: .
+    resources:
+      - path: Assets.xcassets
+      - path: LaunchScreen.storyboard   # <-- wichtig
     info:
       path: Info.plist
     settings:
