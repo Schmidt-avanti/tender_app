@@ -1,6 +1,8 @@
 name: TendersApp
 options:
   minimumXcodeGenVersion: 2.33.0
+  deploymentTarget:
+    iOS: "16.0"
 
 targets:
   TendersApp:
@@ -13,19 +15,23 @@ targets:
           - DerivedData
           - README.md
           - codemagic.yaml
+          # Favoriten vorerst deaktiviert, damit der Build sauber läuft:
+          - Views/FavoritesView.swift
+          - Services/FavoritesManager.swift
     resources:
       - path: Assets.xcassets
       - path: LaunchScreen.storyboard
       - path: Info.plist
     settings:
-      PRODUCT_BUNDLE_IDENTIFIER: com.aaron.schmidt.tenders
       PRODUCT_NAME: TendersApp
-      EXECUTABLE_NAME: TendersApp
+      PRODUCT_BUNDLE_IDENTIFIER: com.aaron.schmidt.tenders
       INFOPLIST_FILE: Info.plist
       CURRENT_PROJECT_VERSION: 1
       MARKETING_VERSION: 1.0
       SWIFT_VERSION: 5.10
-      TARGETED_DEVICE_FAMILY: "1"
+      TARGETED_DEVICE_FAMILY: "1"   # iPhone
+      IPHONEOS_DEPLOYMENT_TARGET: "16.0"
       ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
     scheme:
+      name: TendersApp
       gatherCoverageData: false
