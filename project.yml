@@ -1,6 +1,7 @@
 name: TendersApp
 options:
-  bundleIdPrefix: com.aaron.schmidt
+  minimumXcodeGenVersion: 2.33.0
+
 targets:
   TendersApp:
     type: application
@@ -8,11 +9,21 @@ targets:
     deploymentTarget: "16.0"
     sources:
       - path: .
+        excludes:
+          - DerivedData
+          - README.md
+          - codemagic.yaml
     resources:
       - path: Assets.xcassets
-      - path: LaunchScreen.storyboard   # <-- wichtig
-    info:
-      path: Info.plist
+      - path: LaunchScreen.storyboard
+      - path: Info.plist
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.aaron.schmidt.tenders
-      CODE_SIGN_STYLE: Manual
+      INFOPLIST_FILE: Info.plist
+      CURRENT_PROJECT_VERSION: 1
+      MARKETING_VERSION: 1.0
+      SWIFT_VERSION: 5.10
+      TARGETED_DEVICE_FAMILY: "1"
+      ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+    scheme:
+      gatherCoverageData: false
