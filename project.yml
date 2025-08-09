@@ -12,10 +12,12 @@ targets:
     sources:
       - path: .
         excludes:
+          - .git/**            # << NEU: verhindert Kopieren von Git-Hooks in die App
+          - project.yml        # << NEU: kommt sonst als Ressource in die .app
           - DerivedData
           - README.md
           - codemagic.yaml
-          # Favoriten vorerst deaktiviert, damit der Build sauber läuft:
+          # Favorites vorerst deaktiviert:
           - Views/FavoritesView.swift
           - Services/FavoritesManager.swift
     resources:
@@ -29,7 +31,7 @@ targets:
       CURRENT_PROJECT_VERSION: 1
       MARKETING_VERSION: 1.0
       SWIFT_VERSION: 5.10
-      TARGETED_DEVICE_FAMILY: "1"   # iPhone
+      TARGETED_DEVICE_FAMILY: "1"
       IPHONEOS_DEPLOYMENT_TARGET: "16.0"
       ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
     scheme:
