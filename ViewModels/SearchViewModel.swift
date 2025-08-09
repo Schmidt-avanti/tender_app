@@ -1,41 +1,39 @@
 import Foundation
+import SwiftUI
 
 @MainActor
 final class SearchViewModel: ObservableObject {
     @Published var query: String = ""
     @Published var isSearching = false
     @Published var results: [Tender] = []
-    @Published var errorMessage: String? = nil
+    @Published var errorMessage: String?
 
     private let openai = OpenAIClient()
     private var provider: SearchProvider
     private let fetcher = PageFetcher()
     private let extractor = TenderExtractor()
 
-    // Liest Key erst aus Env, dann aus Info.plist
-    private func key(_ name: String) -> String? {
-        if let v = ProcessInfo.processInfo.environment[name], !v.isEmpty { return v }
-        if let v = Bundle.main.object(forInfoDictionaryKey: name) as? String, !v.isEmpty { return v }
-        return nil
-    }
-
     init(provider: SearchProvider? = nil) {
-        if let provider {
-            self.provider = provider
-            return
-        }
+        // 1) ZUERST einen gültigen Default setzen
+        self.provider = provider ?? LocalMockSearchProvider()
 
-        if let serp = key("SERP_API_KEY") {
+        // 2) Dann anhand von Keys „echten“ Provider wählen
+        if let serp = Self.readKey("SERP_API_KEY") ?? (AppSecrets.serpApiKey.isEmpty ? nil : AppSecrets.serpApiKey) {
             self.provider = SerpAPIProvider(apiKey: serp)
-        } else if let bing = key("BING_API_KEY") {
+        } else if let bing = Self.readKey("BING_API_KEY") ?? (AppSecrets.bingApiKey.isEmpty ? nil : AppSecrets.bingApiKey) {
             self.provider = BingWebSearchProvider(apiKey: bing)
         } else if !AppSecrets.serpApiKey.isEmpty {
-            self.provider = SerpAPIProvider(apiKey: AppSecrets.serpApiKey)
+            self.provider = SerpAPIProvider()
         } else if !AppSecrets.bingApiKey.isEmpty {
-            self.provider = BingWebSearchProvider(apiKey: AppSecrets.bingApiKey)
-        } else {
-            self.provider = LocalMockSearchProvider()
+            self.provider = BingWebSearchProvider()
         }
+    }
+
+    // Statische Helper-Funktion: liest zuerst Umgebungsvariable, sonst UserDefaults
+    private static func readKey(_ name: String) -> String? {
+        if let env = ProcessInfo.processInfo.environment[name], !env.isEmpty { return env }
+        if let stored = UserDefaults.standard.string(forKey: name), !stored.isEmpty { return stored }
+        return nil
     }
 
     func performSearch() async {
@@ -54,7 +52,6 @@ final class SearchViewModel: ObservableObject {
         do {
             let urls = try await provider.search(query: expandedQuery, limit: 5)
             var found: [Tender] = []
-
             for url in urls {
                 do {
                     let text = try await fetcher.fetchPlainText(from: url)
@@ -62,16 +59,16 @@ final class SearchViewModel: ObservableObject {
                         found.append(t)
                     }
                 } catch {
-                    // Einzelne URL-Fehler ignorieren
+                    // pro-URL Fehler ignorieren
                 }
             }
-
-            if found.isEmpty, provider is LocalMockSearchProvider, query.trimmingCharacters(in: .whitespaces).isEmpty {
+            if found.isEmpty && provider is LocalMockSearchProvider {
                 found = [Tender.mock]
             }
-
             results = found
-            if results.isEmpty { errorMessage = "Keine passenden Ausschreibungen gefunden." }
+            if results.isEmpty {
+                errorMessage = "Keine passenden Ausschreibungen gefunden."
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -79,9 +76,11 @@ final class SearchViewModel: ObservableObject {
 
     private func expandQuery(_ q: String) async throws -> String {
         let sys = "Du verbesserst Suchanfragen für öffentliche Ausschreibungen. Antworte NUR mit der finalen Suchphrase."
-        let user = "Verbessere folgende Suchanfrage für relevante EU-/DACH-Ausschreibungen (keine Werbung, nur seriöse Quellen): \"\(q)\". Nutze deutschsprachige Keywords und CPV-ähnliche Begriffe."
-        let out = try await openai.complete(systemPrompt: sys, userPrompt: user, model: .gpt4oMini, temperature: 0.2)
+        let user = "Verbessere folgende Suchanfrage für relevante EU-/DACH-Ausschreibungen (keine Werbung, nur seriöse Quellen): \"\(q)\". Nutze deutschsprachige Keywords + CPV-ähnliche Begriffe."
+        let out = try await openai.complete(systemPrompt: sys,
+                                            userPrompt: user,
+                                            model: .gpt4oMini,
+                                            temperature: 0.2)
         return out.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
-
