@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>TendersApp</string>
+    <key>CFBundleDisplayName</key>
+    <string>TendersApp</string>
+
+    <key>CFBundleIdentifier</key>
+    <string>com.aaron.schmidt.tenders</string>
+
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+
+    <!-- Wichtig für Sideloadly/Xcode: Name des Binaries -->
+    <key>CFBundleExecutable</key>
+    <string>TendersApp</string>
+
+    <key>UILaunchStoryboardName</key>
+    <string>LaunchScreen</string>
+    <key>UIRequiresFullScreen</key>
+    <true/>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+    </array>
+
+    <key>UIApplicationSceneManifest</key>
+    <dict>
+        <key>UIApplicationSupportsMultipleScenes</key>
+        <false/>
+    </dict>
+
+    <key>NSCalendarsUsageDescription</key>
+    <string>Wir benötigen Zugriff auf deinen Kalender, um Fristen als Termine hinzuzufügen.</string>
+</dict>
+</plist>

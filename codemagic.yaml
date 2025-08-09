@@ -1,0 +1,49 @@
+workflows:
+  ios_unsigned_ipa:
+    name: Build unsigned IPA (for Sideloadly)
+    max_build_duration: 60
+    environment:
+      xcode: 16.0
+      vars:
+        SCHEME: TendersApp
+        BUNDLE_ID: com.aaron.schmidt.tenders
+    scripts:
+      - name: Install XcodeGen
+        script: brew install xcodegen
+      - name: Generate Xcode project
+        script: |
+          set -e
+          xcodegen generate
+          ls -la
+      - name: Build Release (no code signing)
+        script: |
+          set -e
+          set -o pipefail
+          DERIVED="$CM_BUILD_DIR/DerivedData"
+          xcodebuild \
+            -project TendersApp.xcodeproj \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath "$DERIVED" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
+          echo "DERIVED=$DERIVED" >> $CM_ENV
+      - name: Package unsigned .ipa
+        script: |
+          set -e
+          APP_PATH=$(find "$DERIVED/Build/Products/Release-iphoneos" -maxdepth 1 -type d -name "*.app" | head -n 1)
+          echo "Found app at: $APP_PATH"
+
+          # Logge Executable-Name zur Kontrolle
+          EXEC=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP_PATH/Info.plist")
+          echo "CFBundleExecutable: $EXEC"
+          ls -la "$APP_PATH"
+
+          mkdir -p "$CM_BUILD_DIR/Payload"
+          # WICHTIG: .app NICHT umbenennen
+          cp -R "$APP_PATH" "$CM_BUILD_DIR/Payload/"
+          (cd "$CM_BUILD_DIR" && zip -qry "TendersApp-unsigned.ipa" Payload)
+    artifacts:
+      - $CM_BUILD_DIR/TendersApp-unsigned.ipa
+      - $CM_BUILD_DIR/DerivedData/Build/Products/Release-iphoneos/*.app
