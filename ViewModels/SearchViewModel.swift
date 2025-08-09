@@ -66,7 +66,7 @@ final class SearchViewModel: ObservableObject {
 
     private func expandQuery(_ q: String) async throws -> String {
         let sys = "Du verbesserst Suchanfragen für öffentliche Ausschreibungen. Antworte NUR mit der finalen Suchphrase."
-        let user = "Verbessere folgende Suchanfrage für relevante EU-/DACH-Ausschreibungen (keine Werbung, nur seriöse Quellen): "\(q)". Nutze deutschsprachige Keywords + CPV-ähnliche Begriffe."
+        let user = "Verbessere folgende Suchanfrage für relevante EU-/DACH-Ausschreibungen (keine Werbung, nur seriöse Quellen): \"\(q)\". Nutze deutschsprachige Keywords + CPV-ähnliche Begriffe."
         let out = try await openai.complete(systemPrompt: sys, userPrompt: user, model: .gpt4oMini, temperature: 0.2)
         return out.trimmingCharacters(in: .whitespacesAndNewlines)
     }
