@@ -1,79 +1,93 @@
 import Foundation
 import Combine
 
-/// Manages the user's favourite tenders and notes.  Stores data in
-/// UserDefaults under the key "favorites".  Provides methods to
-/// toggle favourites, check favourite status and manage notes.
+/// Verwalten von Favoriten (leichtgewichtige Snapshots, nicht der ganze Tender).
+@MainActor
 final class FavoritesManager: ObservableObject {
-    struct FavoriteData: Codable {
-        let tender: Tender
-        var note: String
-    }
-    
-    @Published private(set) var items: [String: FavoriteData] = [:]
-    
     static let shared = FavoritesManager()
-    private let storageKey = "favorites"
-    private let decoder = JSONDecoder()
-    private let encoder = JSONEncoder()
-    
+
+    /// Gespeicherter Stand je Tender-ID
+    @Published private(set) var items: [String: FavoriteData] = [:]
+
+    private let storageKey = "favorites.v1"
+
     private init() {
         load()
+        // Bei Änderungen automatisch persistieren
+        $items
+            .debounce(for: .milliseconds(150), scheduler: RunLoop.main)
+            .sink { [weak self] _ in self?.save() }
+            .store(in: &cancellables)
     }
-    
-    /// Toggle a tender's favourite state.  If it isn't favourited
-    /// already it will be stored with an empty note; otherwise it will
-    /// be removed.
+
+    // MARK: - Public API (wie im UI verwendet)
+
+    /// Favorit an/aus für gegebenen Tender
     func toggle(tender: Tender) {
         if items[tender.id] != nil {
-            remove(id: tender.id)
+            items.removeValue(forKey: tender.id)
         } else {
-            add(tender: tender)
+            items[tender.id] = FavoriteData(
+                id: tender.id,
+                title: tender.title,
+                url: tender.url?.absoluteString,
+                note: items[tender.id]?.note // evtl. bestehende Notiz mitnehmen
+            )
         }
     }
-    
-    private func add(tender: Tender) {
-        items[tender.id] = FavoriteData(tender: tender, note: "")
-        save()
-    }
-    
-    func remove(id: String) {
-        items.removeValue(forKey: id)
-        save()
-    }
-    
-    func isFavorite(id: String) -> Bool {
-        return items[id] != nil
-    }
-    
-    func note(for id: String) -> String {
-        return items[id]?.note ?? ""
-    }
-    
+
+    /// Abfrage über Tender-ID
+    func isFavorite(id: String) -> Bool { items[id] != nil }
+
+    /// Bequeme Überladung
+    func isFavorite(_ tender: Tender) -> Bool { isFavorite(id: tender.id) }
+
+    /// Notiz setzen (leer erlaubt)
     func setNote(_ note: String, for id: String) {
-        guard var fav = items[id] else { return }
-        fav.note = note
-        items[id] = fav
-        save()
-    }
-    
-    private func save() {
-        do {
-            let data = try encoder.encode(items)
-            UserDefaults.standard.set(data, forKey: storageKey)
-            objectWillChange.send()
-        } catch {
-            print("Failed to save favourites: \(error)")
+        if var f = items[id] {
+            f.note = note
+            items[id] = f
+        } else {
+            // Falls noch kein Favorit angelegt war, trotzdem Note halten
+            items[id] = FavoriteData(id: id, title: "", url: nil, note: note)
         }
     }
-    
+
+    /// Notiz abfragen
+    func note(for id: String) -> String {
+        items[id]?.note ?? ""
+    }
+
+    // MARK: - Internals & Persistence
+
+    private var cancellables = Set<AnyCancellable>()
+
     private func load() {
         guard let data = UserDefaults.standard.data(forKey: storageKey) else { return }
         do {
-            let decoded = try decoder.decode([String: FavoriteData].self, from: data)
+            let decoded = try JSONDecoder().decode([String: FavoriteData].self, from: data)
             self.items = decoded
         } catch {
-            print("Failed to load favourites: \(error)")
+            // bei Schemaänderungen lieber frisch starten
+            self.items = [:]
         }
+    }
+
+    private func save() {
+        do {
+            let data = try JSONEncoder().encode(items)
+            UserDefaults.standard.set(data, forKey: storageKey)
+        } catch {
+            // Persistenzfehler bewusst still – UI soll nicht blockieren
+            // (Optional: Logging ergänzen)
+        }
+    }
+
+    // Leichtgewichtige, codierbare Snapshot-Struktur
+    struct FavoriteData: Codable, Hashable {
+        let id: String
+        var title: String
+        var url: String?
+        var note: String?
     }
 }
