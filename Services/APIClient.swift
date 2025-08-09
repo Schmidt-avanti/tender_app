@@ -1,41 +1,35 @@
 import Foundation
 import Combine
 
-/// A simple HTTP client used to talk to the backend.  Encodes
-/// `SearchFilters` into JSON and decodes an array of `Tender` from the
-/// response.  Dates are decoded as ISO8601.
+// Minimales TED-Modell für die Liste
+private struct TedNoticeLite: Decodable {
+    let id: String?
+    let title: String?
+    let publicationDate: String?
+    let buyerCountry: String?
+    let links: LinksContainer?
+
+    struct LinksContainer: Decodable {
+        let pdf: String?
+        let html: String?
+    }
+}
+
+private struct TedSearchResponse: Decodable {
+    let total: Int?
+    let notices: [TedNoticeLite]?
+}
+
+/// HTTP-Client für TED Europa (ohne API-Key)
 final class APIClient {
     static let shared = APIClient()
-
     private init() {}
 
-    /// Represents a minimal notice returned from the TED search API.
-    private struct TedNoticeLite: Decodable {
-        let id: String?
-        let title: String?
-        let publicationDate: String?
-        let buyerCountry: String?
-        let links: LinksContainer?
-
-        struct LinksContainer: Decodable {
-            let pdf: String?
-            let html: String?
-        }
-    }
-
-    private struct TedSearchResponse: Decodable {
-        let total: Int?
-        let notices: [TedNoticeLite]?
-    }
-
-    /// Performs a search against the TED Europa API using the provided filters.
-    /// The TED API does not require authentication.  We build an expert query
-    /// string based on selected countries, CPV codes and free text.  Deadline
-    /// and value filters are not supported directly by TED and are therefore
-    /// ignored in this basic implementation.
+    /// Combine-Variante (bestehende Pipelines bleiben nutzbar)
     func search(filters: SearchFilters) -> AnyPublisher<[Tender], Error> {
-        // Construct the expert query string
+        // Expert-Query aus UI-Filtern bauen
         var terms: [String] = []
+
         if !filters.regions.isEmpty {
             let countries = filters.regions.map { $0.uppercased() }.joined(separator: " OR ")
             terms.append("(buyerCountry:\(countries))")
@@ -44,70 +38,81 @@ final class APIClient {
             let cpv = filters.cpv.joined(separator: " OR ")
             terms.append("(cpvCode:\(cpv))")
         }
-        let trimmedText = filters.freeText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedText.isEmpty {
-            // quote the text to handle spaces properly
-            terms.append("text:\(trimmedText)")
+        let text = filters.freeText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty {
+            terms.append("text:\(text)")
         }
-        let q: String
-        if terms.isEmpty {
-            // default to contract notices and awards if no specific filters
-            q = "type:contract-notice OR type:contract-award"
-        } else {
-            q = terms.joined(separator: " AND ")
-        }
+
+        let q = terms.isEmpty
+        ? "type:contract-notice OR type:contract-award"
+        : terms.joined(separator: " AND ")
+
         let body: [String: Any] = [
             "q": q,
             "page": 1,
             "limit": 25,
-            "fields": ["id", "title", "publicationDate", "buyerCountry", "links.pdf", "links.html"]
+            "fields": ["id","title","publicationDate","buyerCountry","links.pdf","links.html"]
         ]
+
         guard let url = URL(string: "https://api.ted.europa.eu/v3/notices/search") else {
             return Fail(error: URLError(.badURL)).eraseToAnyPublisher()
         }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        do {
-            request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
-        } catch {
-            return Fail(error: error).eraseToAnyPublisher()
-        }
-        return URLSession.shared.dataTaskPublisher(for: request)
-            .tryMap { output in
-                guard let http = output.response as? HTTPURLResponse,
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        do { req.httpBody = try JSONSerialization.data(withJSONObject: body) }
+        catch { return Fail(error: error).eraseToAnyPublisher() }
+
+        return URLSession.shared.dataTaskPublisher(for: req)
+            .tryMap { out in
+                guard let http = out.response as? HTTPURLResponse,
                       (200..<300).contains(http.statusCode) else {
                     throw URLError(.badServerResponse)
                 }
-                return output.data
+                return out.data
             }
             .decode(type: TedSearchResponse.self, decoder: JSONDecoder())
-            .map { response in
-                let notices = response.notices ?? []
-                return notices.map { n -> Tender in
-                    // map missing fields gracefully
-                    let id = n.id ?? UUID().uuidString
-                    let title = n.title ?? "Ohne Titel"
-                    let country = n.buyerCountry
-                    let pdf = n.links?.pdf
-                    let html = n.links?.html
-                    let urlStr = pdf ?? html
-                    let url = urlStr.flatMap { URL(string: $0) }
+            .map { resp in
+                (resp.notices ?? []).map { n in
+                    let urlStr = n.links?.pdf ?? n.links?.html
                     return Tender(
-                        id: id,
+                        id: n.id ?? UUID().uuidString,
                         source: "TED",
-                        title: title,
+                        title: n.title ?? "Ohne Titel",
                         buyer: nil,
                         cpv: [],
-                        country: country,
+                        country: n.buyerCountry,
                         city: nil,
-                        deadline: nil,
-                        valueEstimate: nil,
-                        url: url
+                        deadline: nil,          // (Phase 2 via Detail-XML möglich)
+                        valueEstimate: nil,     // (Phase 2)
+                        url: urlStr.flatMap(URL.init(string:))
                     )
                 }
             }
             .receive(on: RunLoop.main)
             .eraseToAnyPublisher()
+    }
+
+    /// Async/await-Wrapper, damit bestehende Aufrufer wie
+    /// `SavedSearchManager.asyncSearch` weiterhin funktionieren.
+    func asyncSearch(filters: SearchFilters) async throws -> [Tender] {
+        try await withCheckedThrowingContinuation { cont in
+            var cancellable: AnyCancellable?
+            cancellable = self.search(filters: filters)
+                .sink(
+                    receiveCompletion: { completion in
+                        switch completion {
+                        case .finished: break
+                        case .failure(let error): cont.resume(throwing: error)
+                        }
+                        _ = cancellable // keep alive bis completion
+                    },
+                    receiveValue: { value in
+                        cont.resume(returning: value)
+                        _ = cancellable
+                    }
+                )
+        }
     }
 }
