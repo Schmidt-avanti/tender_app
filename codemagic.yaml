@@ -1,0 +1,33 @@
+workflows:
+  ios-release:
+    name: iOS Release (Sideloadly friendly)
+    max_build_duration: 60
+    environment:
+      vars:
+        XCODE_WORKSPACE: "TendersApp.xcodeproj"
+        XCODE_SCHEME: "TendersApp"
+      groups:
+        - ios_credentials
+    scripts:
+      - name: Set API keys as environment for build
+        script: |
+          echo "OPENAI_API_KEY set? ${OPENAI_API_KEY:+yes}" 
+          echo "SERP_API_KEY set? ${SERP_API_KEY:+yes}" 
+          echo "BING_API_KEY set? ${BING_API_KEY:+yes}" 
+      - name: Build iOS (no signing)
+        script: |
+          xcodebuild -project "$XCODE_WORKSPACE" -scheme "$XCODE_SCHEME" -configuration Release -sdk iphoneos CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+    artifacts:
+      - DerivedData/**/Build/Products/Release-iphoneos/*.app
+    publishing:
+      scripts:
+        - name: Export .ipa for Sideloadly
+          script: |
+            mkdir -p artifacts
+            APP_PATH=$(find DerivedData -name "*.app" -type d | head -n 1)
+            if [ -d "$APP_PATH" ]; then
+              pushd "$(dirname "$APP_PATH")"
+              zip -r app.zip "$(basename "$APP_PATH")"
+              popd
+              mv "$(dirname "$APP_PATH")/app.zip" artifacts/TendersApp.ipa
+            fi
