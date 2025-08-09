@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// Container mit Tab-Navigation für Suche, gespeicherte Suchen,
-/// Favoriten, Bid-Workflow und Statistik.
 struct RootView: View {
     @StateObject private var searchVM = SearchViewModel()
     @EnvironmentObject private var favs: FavoritesManager
@@ -10,7 +8,7 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
-            // Vollflächiger Hintergrund über Dynamic Island & Home-Indikator
+            // Vollflächiger Hintergrund gegen Letterboxing
             Color(.systemBackground).ignoresSafeArea()
 
             TabView {
@@ -30,8 +28,8 @@ struct RootView: View {
                     .tabItem { Label("Statistik", systemImage: "chart.bar") }
             }
         }
-        .onAppear {
-            // Erste Suche beim Start anstoßen (damit Stats/Favoriten Daten haben)
+        .task {
+            // Erste Suche anstoßen, damit Stats/Favoriten Daten bekommen
             if searchVM.results.isEmpty {
                 searchVM.runSearch()
             }
@@ -39,11 +37,9 @@ struct RootView: View {
     }
 }
 
-struct RootView_Previews: PreviewProvider {
-    static var previews: some View {
-        RootView()
-            .environmentObject(FavoritesManager.shared)
-            .environmentObject(SavedSearchManager.shared)
-            .environmentObject(BidManager.shared)
-    }
+#Preview {
+    RootView()
+        .environmentObject(FavoritesManager.shared)
+        .environmentObject(SavedSearchManager.shared)
+        .environmentObject(BidManager.shared)
 }
