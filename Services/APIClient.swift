@@ -21,13 +21,12 @@ private struct TedSearchResponse: Decodable {
 }
 
 /// HTTP-Client für TED Europa (ohne API-Key).
-/// Ruft POST /v3/notices/search auf. Body: query + page/limit + fields (Pflicht).
+/// Nutzt jetzt die **GET**-Variante von /v3/notices/search → kein `fields` nötig.
 final class APIClient {
     static let shared = APIClient()
     private init() {}
 
     func search(filters: SearchFilters) -> AnyPublisher<[Tender], Error> {
-
         // 1) Expert-Query aus Filtern bauen
         var terms: [String] = []
 
@@ -35,47 +34,34 @@ final class APIClient {
             let countries = filters.regions.map { $0.uppercased() }.joined(separator: " OR ")
             terms.append("(buyerCountry:\(countries))")
         }
-
         if !filters.cpv.isEmpty {
             let cpv = filters.cpv.joined(separator: " OR ")
             terms.append("(cpvCode:\(cpv))")
         }
-
         let text = filters.freeText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !text.isEmpty {
-            terms.append("text:\(text)")
-        }
+        if !text.isEmpty { terms.append("text:\(text)") }
 
         let expert = terms.isEmpty
             ? "type:contract-notice OR type:contract-award"
             : terms.joined(separator: " AND ")
 
-        // 2) Korrektes Request-Format: "query" + minimale "fields"
-        //    KEINE verschachtelten Dot-Felder (z. B. "links.pdf") – das führt zu Validierungsfehlern.
-        let body: [String: Any] = [
-            "query": expert,
-            "page": 1,
-            "limit": 25,
-            "fields": ["id", "title", "publicationDate", "buyerCountry", "links"]
+        // 2) GET-Request aufbauen
+        var comps = URLComponents(string: "https://api.ted.europa.eu/v3/notices/search")!
+        comps.queryItems = [
+            URLQueryItem(name: "query", value: expert),
+            URLQueryItem(name: "page", value: "1"),
+            URLQueryItem(name: "limit", value: "25")
         ]
-
-        guard let url = URL(string: "https://api.ted.europa.eu/v3/notices/search") else {
+        guard let url = comps.url else {
             return Fail(error: URLError(.badURL)).eraseToAnyPublisher()
         }
 
         var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpMethod = "GET"
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue("TendersApp/1.0 (iOS)", forHTTPHeaderField: "User-Agent")
 
-        do {
-            req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        } catch {
-            return Fail(error: error).eraseToAnyPublisher()
-        }
-
-        // 3) Request -> Mapping auf dein Tender-Modell
+        // 3) Request → Mapping
         return URLSession.shared.dataTaskPublisher(for: req)
             .tryMap { out in
                 guard let http = out.response as? HTTPURLResponse else {
@@ -110,7 +96,7 @@ final class APIClient {
             .eraseToAnyPublisher()
     }
 
-    /// Async/Await-Wrapper
+    // Async/Await-Wrapper
     func asyncSearch(filters: SearchFilters) async throws -> [Tender] {
         try await withCheckedThrowingContinuation { cont in
             var cancellable: AnyCancellable?
@@ -131,3 +117,4 @@ final class APIClient {
         }
     }
 }
+
