@@ -7,7 +7,7 @@ workflows:
       vars:
         SCHEME: TendersApp
         CONFIGURATION: Release
-        BUNDLE_ID: com.example.TendersApp
+        BUNDLE_ID: com.aaronschmidt.TendersApp
       groups:
         - app_store_credentials   # defined in Codemagic UI
     scripts:
@@ -59,4 +59,4 @@ workflows:
     publishing:
       email:
         recipients:
-          - your@email
+          - aaron.schmidt.consulting@gmail.com
