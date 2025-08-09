@@ -1,50 +1,42 @@
-//
-//  StatsView.swift
-//  TendersApp
-//
-
 import SwiftUI
-import Charts
 
 struct StatsView: View {
-    @ObservedObject var viewModel: SearchViewModel
-
-    struct Bucket: Identifiable, Hashable {
-        var id: String { label }
-        let label: String
-        let count: Int
-    }
-
-    private var buckets: [Bucket] {
-        let groups = Dictionary(grouping: viewModel.results, by: { $0.country })
-            .map { (key, vals) in Bucket(label: key, count: vals.count) }
-            .sorted { $0.count > $1.count }
-        return groups
-    }
+    // Falls du hier ein ViewModel nutzt, kannst du es wie gewohnt injizieren.
+    // @EnvironmentObject var searchViewModel: SearchViewModel
 
     var body: some View {
-        NavigationView {
-            VStack {
-                if buckets.isEmpty {
-                    ContentUnavailableView("Keine Daten", systemImage: "chart.bar", description: Text("Führe zuerst eine Suche aus."))
-                        .padding()
-                } else {
-                    Chart(buckets) { b in
-                        BarMark(
-                            x: .value("Land", b.label),
-                            y: .value("Anzahl", b.count)
-                        )
-                    }
-                    .frame(height: 300)
-                    .padding()
+        Group {
+            // Beispiel: Wenn du echte Daten hast, zeige sie hier. Andernfalls: leere Ansicht.
+            // if hasData { ... } else { ... }
+
+            // iOS 17+: ContentUnavailableView
+            if #available(iOS 17.0, *) {
+                ContentUnavailableView(
+                    "Keine Daten",
+                    systemImage: "chart.bar",
+                    description: Text("Führe zuerst eine Suche aus.")
+                )
+            } else {
+                // iOS 16 Fallback
+                VStack(spacing: 12) {
+                    Image(systemName: "chart.bar")
+                        .font(.system(size: 40))
+                    Text("Keine Daten")
+                        .font(.headline)
+                    Text("Führe zuerst eine Suche aus.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
                 }
-                Spacer()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .multilineTextAlignment(.center)
+                .padding()
             }
-            .navigationTitle("Statistik")
         }
+        .navigationTitle("Statistiken")
+        .background(Color(UIColor.systemBackground))
     }
 }
 
 #Preview {
-    StatsView(viewModel: SearchViewModel())
+    StatsView()
 }
