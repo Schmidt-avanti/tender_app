@@ -5,7 +5,7 @@ workflows:
     environment:
       xcode: 16.4
       vars:
-        SCHEME: TendersApp        # ← ggf. auf dein Scheme ändern
+        SCHEME: TendersApp          # <- ggf. Dein Scheme hier eintragen
         CONFIGURATION: Release
         DERIVED_DATA: $CM_BUILD_DIR/DerivedData
 
@@ -14,7 +14,10 @@ workflows:
         script: |
           set -eo pipefail
 
-          # 1) Projekt/Workspace finden (oder mit XcodeGen erzeugen)
+          echo "📂 Repo-Inhalt:"
+          ls -la
+
+          # 1) Projekt/Workspace finden – oder mit XcodeGen generieren
           if ls -1 *.xcworkspace >/dev/null 2>&1; then
             CONTAINER="$(ls -1 *.xcworkspace | head -n1)"
             PROJECT_FLAG=( -workspace "$CONTAINER" )
@@ -22,20 +25,34 @@ workflows:
             CONTAINER="$(ls -1 *.xcodeproj | head -n1)"
             PROJECT_FLAG=( -project "$CONTAINER" )
           elif [ -f project.yml ] || [ -f project.yaml ]; then
-            echo "Kein Xcode-Projekt gefunden – generiere mit XcodeGen…"
+            echo "🛠️  Kein Xcode-Projekt gefunden – generiere mit XcodeGen…"
             brew install xcodegen || true
-            xcodegen generate
-            CONTAINER="$(ls -1 *.xcodeproj | head -n1)"
-            PROJECT_FLAG=( -project "$CONTAINER" )
+            if [ -f project.yml ]; then
+              xcodegen generate --spec project.yml
+            else
+              xcodegen generate --spec project.yaml
+            fi
+            echo "📂 Inhalt nach XcodeGen:"
+            ls -la
+            # Wieder suchen
+            if ls -1 *.xcworkspace >/dev/null 2>&1; then
+              CONTAINER="$(ls -1 *.xcworkspace | head -n1)"
+              PROJECT_FLAG=( -workspace "$CONTAINER" )
+            elif ls -1 *.xcodeproj >/dev/null 2>&1; then
+              CONTAINER="$(ls -1 *.xcodeproj | head -n1)"
+              PROJECT_FLAG=( -project "$CONTAINER" )
+            else
+              echo "❌ XcodeGen erzeugte kein .xcworkspace/.xcodeproj"
+              exit 1
+            fi
           else
-            echo "❌ Kein .xcworkspace/.xcodeproj (und kein project.yml) im Repo gefunden."
+            echo "❌ Weder .xcworkspace/.xcodeproj noch project.yml(yaml) im Repo."
             exit 1
           fi
 
           echo "➡️  Baue: $CONTAINER | Scheme: $SCHEME"
 
-          # 2) (Optional) Packages auflösen – xcodebuild macht das beim Build ohnehin,
-          #     aber so sieht man früh Fehler:
+          # 2) (optional) Swift Packages auflösen
           xcodebuild "${PROJECT_FLAG[@]}" \
             -scheme "$SCHEME" \
             -resolvePackageDependencies
@@ -52,21 +69,23 @@ workflows:
       - name: Package unsigned .ipa
         script: |
           set -eo pipefail
-          APP_PATH="$(find "$DERIVED_DATA/Build/Products/$CONFIGURATION-iphoneos" -type d -name "*.app" -print -quit)"
+          APP_ROOT="$DERIVED_DATA/Build/Products/$CONFIGURATION-iphoneos"
+          echo "🔎 Suche .app in: $APP_ROOT"
+          APP_PATH="$(find "$APP_ROOT" -maxdepth 1 -type d -name "*.app" -print -quit || true)"
           if [ -z "$APP_PATH" ]; then
-            echo "❌ Keine .app in $DERIVED_DATA/Build/Products/$CONFIGURATION-iphoneos gefunden."
-            ls -R "$DERIVED_DATA/Build/Products" || true
+            echo "❌ Keine .app gefunden:"
+            ls -la "$APP_ROOT" || true
             exit 1
           fi
 
-          echo "Gefundene App: $APP_PATH"
-          rm -rf Payload
+          echo "✅ Gefundene App: $APP_PATH"
+          rm -rf Payload build/ipa
           mkdir -p Payload build/ipa
           cp -R "$APP_PATH" Payload/
           IPA_NAME="${SCHEME}-unsigned-${CM_BUILD_ID}.ipa"
           (zip -qry "build/ipa/$IPA_NAME" Payload)
           rm -rf Payload
-          echo "✅ IPA erstellt: build/ipa/$IPA_NAME"
+          echo "🎁 IPA erstellt: build/ipa/$IPA_NAME"
 
     artifacts:
       - build/ipa/*.ipa
@@ -76,7 +95,8 @@ workflows:
     publishing:
       email:
         recipients:
-          - you@example.com
+          - aaron.schmidt.consulting@gmail.com
         notify:
           success: true
           failure: true
+
