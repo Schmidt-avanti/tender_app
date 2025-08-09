@@ -31,7 +31,7 @@ struct RootView: View {
             }
         }
         .onAppear {
-            // Erste Suche beim Start auslösen (für Stats/Favoriten)
+            // Erste Suche beim Start anstoßen (damit Stats/Favoriten Daten haben)
             if searchVM.results.isEmpty {
                 searchVM.runSearch()
             }
