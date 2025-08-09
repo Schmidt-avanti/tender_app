@@ -1,129 +1,165 @@
 import SwiftUI
 
-/// Displays the full details of a tender.  Users can toggle it as a
-/// favourite, write a personal note, schedule a calendar reminder and
-/// trigger a test push notification.
+/// Detailansicht einer Ausschreibung inklusive Metadaten,
+/// Favorit, Notizfeld, Kalender- und Benachrichtigungsaktionen sowie Bid-Workflow.
 struct TenderDetailView: View {
     let tender: Tender
+
     @EnvironmentObject private var favs: FavoritesManager
-    @State private var noteText: String = ""
-    @State private var showAlert: Bool = false
     @EnvironmentObject private var bidManager: BidManager
+
+    @State private var noteText: String = ""
+    @State private var showCalendarAlert: Bool = false
     @State private var showBid: Bool = false
-    
+
+    // MARK: - Body
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                HStack {
+
+                // Titel + Favoriten
+                HStack(alignment: .top) {
                     Text(tender.title)
-                        .font(.title)
-                        .bold()
-                    Spacer()
-                    Button(action: {
+                        .font(.largeTitle.bold())
+                        .lineLimit(3)
+                    Spacer(minLength: 8)
+                    Button {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
                             favs.toggle(tender: tender)
                         }
-                    }) {
+                    } label: {
                         Image(systemName: favs.isFavorite(id: tender.id) ? "star.fill" : "star")
                             .foregroundColor(.yellow)
                             .font(.title2)
-                            .scaleEffect(favs.isFavorite(id: tender.id) ? 1.3 : 1.0)
+                            .scaleEffect(favs.isFavorite(id: tender.id) ? 1.2 : 1.0)
+                            .accessibilityLabel(favs.isFavorite(id: tender.id) ? "Als Favorit markiert" : "Als Favorit markieren")
                     }
                     .buttonStyle(.plain)
                 }
-                if let buyer = tender.buyer {
-                    Text("Auftraggeber: \(buyer)")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+
+                // Metadaten
+                VStack(alignment: .leading, spacing: 6) {
+                    if let pub = tender.publishedAt {
+                        Label("Veröffentlicht: \(pub.formatted(date: .abbreviated, time: .omitted))", systemImage: "calendar")
+                    }
+                    if let dl = tender.deadline {
+                        Label("Abgabe: \(dl.formatted(date: .abbreviated, time: .omitted))", systemImage: "clock")
+                    }
+                    if let country = tender.country {
+                        Label("Land: \(country)", systemImage: "globe.europe.africa")
+                    }
+                    if let url = tender.url {
+                        Link(destination: url) {
+                            Label("Zur Ausschreibung (TED)", systemImage: "safari")
+                        }
+                    }
                 }
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+                // Optional: Auftraggeber & CPV
+                if let buyer = tender.buyer {
+                    Divider().padding(.vertical, 2)
+                    Label("Auftraggeber: \(buyer)", systemImage: "building.2")
+                        .foregroundStyle(.secondary)
+                        .font(.callout)
+                }
+
                 if !tender.cpv.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("CPV-Codes:").bold()
-                        HStack(spacing: 8) {
-                            ForEach(tender.cpv, id: \.self) { code in
-                                Pill(text: code)
+                        Text("CPV-Codes")
+                            .font(.headline)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(tender.cpv, id: \.self) { code in
+                                    Pill(text: code)
+                                }
                             }
                         }
                     }
                 }
-                if let deadline = tender.deadline {
-                    Text("Frist: \(deadline, style: .date)")
-                }
+
                 if let estimate = tender.valueEstimate {
                     let formatted = NumberFormatter.localizedString(from: NSNumber(value: estimate), number: .currency)
-                    Text("geschätzter Wert: \(formatted)")
+                    Label("Geschätzter Wert: \(formatted)", systemImage: "eurosign.circle")
+                        .foregroundStyle(.secondary)
+                        .font(.callout)
                 }
-                // Notes section
-                VStack(alignment: .leading, spacing: 4) {
+
+                // Notizen
+                VStack(alignment: .leading, spacing: 6) {
                     Text("Notiz")
                         .font(.headline)
                     TextEditor(text: $noteText)
-                        .frame(height: 100)
+                        .frame(minHeight: 110)
                         .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.gray.opacity(0.3))
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color.gray.opacity(0.25), lineWidth: 1)
                         )
                         .onChange(of: noteText) { newValue in
                             favs.setNote(newValue, for: tender.id)
                         }
                         .onAppear {
-                            // Preload existing note if available
-                            self.noteText = favs.note(for: tender.id)
+                            noteText = favs.note(for: tender.id)
                         }
                 }
-                // Action buttons
-                HStack(spacing: 20) {
-                    Button(action: {
+
+                // Aktionen
+                HStack(spacing: 14) {
+                    Button {
                         CalendarManager.shared.addEvent(for: tender)
-                        showAlert = true
-                    }) {
+                        showCalendarAlert = true
+                    } label: {
                         Label("Termin", systemImage: "calendar.badge.plus")
                     }
-                    Button(action: {
+
+                    Button {
                         NotificationManager.shared.requestPermission()
                         NotificationManager.shared.scheduleTestNotification(for: tender)
-                    }) {
+                    } label: {
                         Label("Info", systemImage: "bell.badge")
                     }
+
                     if let url = tender.url {
                         Link(destination: url) {
                             Label("Original", systemImage: "link")
                         }
                     }
-                    // Bid workflow
-                    Button(action: {
-                        // Create a bid if one doesn't already exist for this tender
-                        if let existing = bidManager.bids.first(where: { $0.tender.id == tender.id }) {
-                            // navigate to existing bid
-                            // Use state to trigger navigation
-                            showBid = true
-                        } else {
-                            let newBid = bidManager.createBid(for: tender)
-                            // update state with the new bid's ID
-                            showBid = true
+
+                    Button {
+                        // existierenden Bid öffnen oder neu anlegen
+                        if bidManager.bids.first(where: { $0.tender.id == tender.id }) == nil {
+                            _ = bidManager.createBid(for: tender)
                         }
-                    }) {
+                        showBid = true
+                    } label: {
                         Label("Bid", systemImage: "doc.plaintext")
                     }
                 }
                 .buttonStyle(.bordered)
-                .padding(.top, 8)
-                Spacer()
+                .padding(.top, 4)
+
+                Spacer(minLength: 12)
             }
             .padding()
         }
         .navigationTitle("Details")
         .navigationBarTitleDisplayMode(.inline)
-        .alert(isPresented: $showAlert) {
-            Alert(title: Text("Kalender"), message: Text("Termin wurde hinzugefügt."), dismissButton: .default(Text("OK")))
+        .alert(isPresented: $showCalendarAlert) {
+            Alert(
+                title: Text("Kalender"),
+                message: Text("Termin wurde hinzugefügt."),
+                dismissButton: .default(Text("OK"))
+            )
         }
+        // Navigation zu Bid-Detail
         .navigationDestination(isPresented: $showBid) {
-            // Determine the bid; ensure there's always at least one
-            if let existing = bidManager.bids.first(where: { $0.tender.id == tender.id }) {
-                BidDetailView(bid: existing)
+            if let bid = bidManager.bids.first(where: { $0.tender.id == tender.id }) {
+                BidDetailView(bid: bid)
             } else {
-                // Should not happen because we create one above
-                Text("Keine Bid vorhanden").foregroundColor(.secondary)
+                // Fallback – sollte praktisch nicht auftreten
+                Text("Keine Bid vorhanden")
+                    .foregroundColor(.secondary)
             }
         }
     }
