@@ -1,41 +1,81 @@
 workflows:
   ios_no_sign:
-    name: iOS Build (no signing)
+    name: TenderSmartApp iOS (no signing)
+    max_build_duration: 60
+
     environment:
-      xcode: latest
+      xcode: 16.4
       vars:
-        OPENAI_API_KEY: Encrypted(…)
-        SERP_API_KEY: Encrypted(…) # oder BING_API_KEY
+        # Falls dein Projekt/Scheme anders heißen, hier anpassen:
+        APP_PROJECT: TenderSmartApp.xcodeproj
+        APP_SCHEME: TenderSmartApp
+        CONFIGURATION: Release
+
+        # Lege diese Keys in Codemagic als "Environment variables" (secure) an
+        OPENAI_API_KEY: Encrypted(PLACEHOLDER)
+        SEARCH_API_KEY: Encrypted(PLACEHOLDER) # z.B. SerpAPI/Bing o.ä.
+
+    cache:
+      cache_paths:
+        - ~/Library/Caches/org.swift.swiftpm
+        - ~/Library/Developer/Xcode/DerivedData
+
     scripts:
+      - name: Toolchain anzeigen
+        script: |
+          xcodebuild -version
+          swift --version
+
       - name: Clean
         script: |
-          rm -rf DerivedData
-      - name: Resolve Swift Packages
+          rm -rf DerivedData Payload *.ipa
+
+      - name: Shared Scheme prüfen (Hinweis)
+        script: |
+          if [ ! -f "$APP_PROJECT/xcshareddata/xcschemes/$APP_SCHEME.xcscheme" ]; then
+            echo "⚠️  Das Scheme '$APP_SCHEME' ist nicht als 'Shared' eingecheckt."
+            echo "    Xcode → Product → Scheme → Manage Schemes… → 'Shared' anhaken → committen."
+          fi
+
+      - name: Swift Packages auflösen
         script: |
           xcodebuild \
-            -project TenderSmartApp.xcodeproj \
-            -scheme TenderSmartApp \
+            -project "$APP_PROJECT" \
+            -scheme "$APP_SCHEME" \
             -resolvePackageDependencies
-      - name: Build Release (no signing)
+
+      - name: Build (kein Code-Signing)
         script: |
+          set -e
           xcodebuild \
-            -project TenderSmartApp.xcodeproj \
-            -scheme TenderSmartApp \
-            -configuration Release \
+            -project "$APP_PROJECT" \
+            -scheme "$APP_SCHEME" \
+            -configuration "$CONFIGURATION" \
             -sdk iphoneos \
             -derivedDataPath DerivedData \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY= \
             build
-      - name: Package .ipa for Sideloadly
+
+      - name: .ipa für Sideloadly erstellen
         script: |
-          APP_PATH=$(find DerivedData/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -n 1)
+          set -e
+          APP_DIR="DerivedData/Build/Products/${CONFIGURATION}-iphoneos"
+          APP_PATH=$(find "$APP_DIR" -maxdepth 1 -name "*.app" | head -n 1)
+
           if [ -z "$APP_PATH" ]; then
-            echo "App (.app) nicht gefunden" && exit 1
+            echo "❌ .app nicht gefunden. Inhalt von ${APP_DIR}:"
+            ls -la "$APP_DIR" || true
+            exit 1
           fi
+
           rm -rf Payload TenderSmartApp.ipa
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
-          zip -r TenderSmartApp.ipa Payload
+          zip -qry TenderSmartApp.ipa Payload
+          echo "✅ TenderSmartApp.ipa erstellt."
+
     artifacts:
       - TenderSmartApp.ipa
-      - DerivedData/Build/Products/Release-iphoneos/*.app
+      - DerivedData/Build/Products/**/*
