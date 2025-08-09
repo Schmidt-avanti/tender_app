@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Placeholder bis die API von SavedSearchManager final ist.
+/// Platzhalteransicht für gespeicherte Suchen.
+/// Kann später durch eine voll funktionsfähige Version ersetzt werden.
 struct SavedSearchesView: View {
     var body: some View {
         NavigationStack {
@@ -11,8 +12,8 @@ struct SavedSearchesView: View {
                 Text("Gespeicherte Suchen")
                     .font(.title3)
                 Text("Diese Ansicht wird in einem späteren Schritt angebunden.")
-                    .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
             }
             .padding()
             .navigationTitle("Gespeichert")
