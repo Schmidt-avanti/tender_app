@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>TendersApp</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.aaron.schmidt.tenders</string>
+    <key>CFBundleVersion</key>
+    <string>1.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>UILaunchStoryboardName</key>
+    <string>LaunchScreen</string>
+    <key>UIRequiresFullScreen</key>
+    <true/>
+    <key>UIApplicationSceneManifest</key>
+    <dict>
+        <key>UIApplicationSupportsMultipleScenes</key>
+        <false/>
+        <key>UISceneConfigurations</key>
+        <dict>
+            <key>UIWindowSceneSessionRoleApplication</key>
+            <array>
+                <dict>
+                    <key>UISceneConfigurationName</key>
+                    <string>Default Configuration</string>
+                    <key>UISceneDelegateClassName</key>
+                    <string></string>
+                    <key>UISceneStoryboardFile</key>
+                    <string></string>
+                </dict>
+            </array>
+        </dict>
+    </dict>
+    <!-- Permissions messages for calendar and notifications -->
+    <key>NSCalendarsUsageDescription</key>
+    <string>Wir benötigen Zugriff auf deinen Kalender, um Fristen als Termine hinzuzufügen.</string>
+    <key>NSUserNotificationUsageDescription</key>
+    <string>Wir senden Benachrichtigungen, wenn neue Ausschreibungen verfügbar sind oder Saved Searches neue Ergebnisse haben.</string>
+</dict>
+</plist>

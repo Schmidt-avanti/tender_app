@@ -1,0 +1,15 @@
+name: TendersApp
+options:
+  bundleIdPrefix: com.aaron.schmidt
+targets:
+  TendersApp:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: .
+    info:
+      path: Info.plist
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.aaron.schmidt.tenders
+      CODE_SIGN_STYLE: Manual
