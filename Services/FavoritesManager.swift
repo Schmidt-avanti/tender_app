@@ -1,93 +1,106 @@
-import Foundation
-import Combine
+import SwiftUI
 
-/// Verwalten von Favoriten (leichtgewichtige Snapshots, nicht der ganze Tender).
-@MainActor
-final class FavoritesManager: ObservableObject {
-    static let shared = FavoritesManager()
+/// Liste der Favoriten auf Basis der leichtgewichtigen Snapshots aus `FavoritesManager`.
+struct FavoritesView: View {
+    @EnvironmentObject private var favorites: FavoritesManager
+    @EnvironmentObject private var bidManager: BidManager
 
-    /// Gespeicherter Stand je Tender-ID
-    @Published private(set) var items: [String: FavoriteData] = [:]
+    var body: some View {
+        NavigationStack {
+            Group {
+                if favorites.items.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "star")
+                            .font(.system(size: 36, weight: .regular))
+                            .foregroundColor(.secondary)
+                        Text("Keine Favoriten")
+                            .font(.title3)
+                            .foregroundColor(.secondary)
+                        Text("Tippe im Treffer auf den Stern, um eine Ausschreibung zu speichern.")
+                            .multilineTextAlignment(.center)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding()
+                } else {
+                    List {
+                        ForEach(sortedFavorites, id: \.id) { f in
+                            NavigationLink(value: f) {
+                                HStack(alignment: .top, spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text(displayTitle(for: f))
+                                            .font(.headline)
+                                            .lineLimit(2)
 
-    private let storageKey = "favorites.v1"
+                                        if let note = f.note, !note.isEmpty {
+                                            Text(note)
+                                                .font(.subheadline)
+                                                .foregroundColor(.secondary)
+                                                .lineLimit(1)
+                                        }
+                                    }
 
-    private init() {
-        load()
-        // Bei Änderungen automatisch persistieren
-        $items
-            .debounce(for: .milliseconds(150), scheduler: RunLoop.main)
-            .sink { [weak self] _ in self?.save() }
-            .store(in: &cancellables)
-    }
+                                    Spacer(minLength: 8)
 
-    // MARK: - Public API (wie im UI verwendet)
-
-    /// Favorit an/aus für gegebenen Tender
-    func toggle(tender: Tender) {
-        if items[tender.id] != nil {
-            items.removeValue(forKey: tender.id)
-        } else {
-            items[tender.id] = FavoriteData(
-                id: tender.id,
-                title: tender.title,
-                url: tender.url?.absoluteString,
-                note: items[tender.id]?.note // evtl. bestehende Notiz mitnehmen
-            )
+                                    Button {
+                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                                            favorites.toggle(tender: makeTender(from: f))
+                                        }
+                                    } label: {
+                                        Image(systemName: "star.fill")
+                                            .foregroundColor(.yellow)
+                                            .font(.title3)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                .padding(.vertical, 6)
+                            }
+                        }
+                        .onDelete(perform: delete)
+                    }
+                    .listStyle(.plain)
+                }
+            }
+            .navigationTitle("Favoriten")
+            .navigationDestination(for: FavoritesManager.FavoriteData.self) { f in
+                TenderDetailView(tender: makeTender(from: f))
+            }
         }
     }
 
-    /// Abfrage über Tender-ID
-    func isFavorite(id: String) -> Bool { items[id] != nil }
+    // MARK: - Helpers
 
-    /// Bequeme Überladung
-    func isFavorite(_ tender: Tender) -> Bool { isFavorite(id: tender.id) }
+    /// Sortierung nach Titel (fallback: ID)
+    private var sortedFavorites: [FavoritesManager.FavoriteData] {
+        favorites.items.values
+            .sorted { displayTitle(for: $0).localizedCaseInsensitiveCompare(displayTitle(for: $1)) == .orderedAscending }
+    }
 
-    /// Notiz setzen (leer erlaubt)
-    func setNote(_ note: String, for id: String) {
-        if var f = items[id] {
-            f.note = note
-            items[id] = f
-        } else {
-            // Falls noch kein Favorit angelegt war, trotzdem Note halten
-            items[id] = FavoriteData(id: id, title: "", url: nil, note: note)
+    private func delete(at offsets: IndexSet) {
+        for idx in offsets {
+            let f = sortedFavorites[idx]
+            favorites.items.removeValue(forKey: f.id)
         }
     }
 
-    /// Notiz abfragen
-    func note(for id: String) -> String {
-        items[id]?.note ?? ""
+    private func displayTitle(for f: FavoritesManager.FavoriteData) -> String {
+        f.title.isEmpty ? "Ausschreibung" : f.title
     }
 
-    // MARK: - Internals & Persistence
-
-    private var cancellables = Set<AnyCancellable>()
-
-    private func load() {
-        guard let data = UserDefaults.standard.data(forKey: storageKey) else { return }
-        do {
-            let decoded = try JSONDecoder().decode([String: FavoriteData].self, from: data)
-            self.items = decoded
-        } catch {
-            // bei Schemaänderungen lieber frisch starten
-            self.items = [:]
-        }
-    }
-
-    private func save() {
-        do {
-            let data = try JSONEncoder().encode(items)
-            UserDefaults.standard.set(data, forKey: storageKey)
-        } catch {
-            // Persistenzfehler bewusst still – UI soll nicht blockieren
-            // (Optional: Logging ergänzen)
-        }
-    }
-
-    // Leichtgewichtige, codierbare Snapshot-Struktur
-    struct FavoriteData: Codable, Hashable {
-        let id: String
-        var title: String
-        var url: String?
-        var note: String?
+    /// Baut einen minimalen `Tender` aus dem Snapshot, damit Navigation/Detail funktionieren.
+    private func makeTender(from f: FavoritesManager.FavoriteData) -> Tender {
+        Tender(
+            id: f.id,
+            source: "TED",
+            title: displayTitle(for: f),
+            buyer: nil,
+            cpv: [],
+            country: nil,
+            city: nil,
+            deadline: nil,
+            publishedAt: nil,
+            valueEstimate: nil,
+            url: f.url.flatMap(URL.init(string:))
+        )
     }
 }
+
