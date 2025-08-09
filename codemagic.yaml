@@ -31,7 +31,7 @@ workflows:
     publishing:
       email:
         recipients:
-          - your@email.tld
+          - aaron.schmidt.consulting@gmail.com
         notify:
           success: false
           failure: true
