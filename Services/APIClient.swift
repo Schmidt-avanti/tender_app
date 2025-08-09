@@ -47,11 +47,12 @@ final class APIClient {
 
         // 1. Versuch mit Wunschfeldern
         return performSearch(query: q, fields: preferredFields)
-            // Wenn Query-Syntax-Fehler → automatische, garantiert gültige Fallback-Query
+            // Wenn Query-Syntax-Fehler → fallback auf eine garantiert gültige, einfache Textsuche
             .catch { [weak self] error -> AnyPublisher<[Tender], Error> in
                 guard let self else { return Fail(error: error).eraseToAnyPublisher() }
-                if self.isQuerySyntaxError(error) {
-                    let fallbackQ = #"type = "contract-notice""#
+                if self.isQuerySyntaxError(error) || self.isUnknownFieldError(error) {
+                    // sehr neutrale Fallback-Query
+                    let fallbackQ = #"text ~ "tender""#
                     return self.performSearch(query: fallbackQ, fields: self.preferredFields)
                 }
                 // Wenn Fields ungültig → aus Fehlermeldung unterstützte Felder ziehen und retry
@@ -135,24 +136,16 @@ final class APIClient {
         )
     }
 
-    // ---------- Query-Builder (neue Syntax!) ----------
+    // ---------- Query-Builder (angepasste Syntax) ----------
     private func buildExpertQuery(from filters: SearchFilters) -> String {
         var parts: [String] = []
 
         if !filters.regions.isEmpty {
-            // buyerCountry IN ("DE","FR")
+            // eForms-Feldname: country-buyer
             let countries = filters.regions
                 .map { "\"\($0.uppercased())\"" }
                 .joined(separator: ",")
-            parts.append("buyerCountry IN (\(countries))")
-        }
-
-        if !filters.cpv.isEmpty {
-            // cpvCode IN ("30200000","79500000")
-            let cpv = filters.cpv
-                .map { "\"\($0)\"" }
-                .joined(separator: ",")
-            parts.append("cpvCode IN (\(cpv))")
+            parts.append("country-buyer IN (\(countries))")
         }
 
         let text = filters.freeText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -163,8 +156,8 @@ final class APIClient {
         }
 
         if parts.isEmpty {
-            // Default: gültige Syntax
-            return #"type IN ("contract-notice","contract-award")"#
+            // KEIN 'type' verwenden – dein Gateway kennt es nicht
+            return #"text ~ "tender""#
         } else {
             return parts.joined(separator: " AND ")
         }
@@ -174,6 +167,11 @@ final class APIClient {
     private func isQuerySyntaxError(_ error: Error) -> Bool {
         let msg = (error as NSError).userInfo[NSLocalizedDescriptionKey] as? String ?? ""
         return msg.uppercased().contains("QUERY_SYNTAX_ERROR")
+    }
+
+    private func isUnknownFieldError(_ error: Error) -> Bool {
+        let msg = (error as NSError).userInfo[NSLocalizedDescriptionKey] as? String ?? ""
+        return msg.uppercased().contains("QUERY_UNKNOWN_FIELD")
     }
 
     private func extractSupportedFields(from error: Error) -> [String]? {
