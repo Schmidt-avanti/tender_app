@@ -1,62 +1,68 @@
 workflows:
-  ios_ipa:
-    name: Build iOS IPA
+  ios_unsigned_ipa:
+    name: iOS unsigned IPA (for Sideloadly)
     max_build_duration: 60
     environment:
       xcode: 15.4
       vars:
         SCHEME: TendersApp
-        CONFIGURATION: Release
-        BUNDLE_ID: com.aaronschmidt.TendersApp
-      groups:
-        - app_store_credentials   # defined in Codemagic UI
+        BUNDLE_ID: com.aaron.schmidt.tenders
     scripts:
-      - name: Install XcodeGen
+      - name: Install tools
         script: |
-          brew install xcodegen
+          brew install xcodegen xcpretty
+
+      # Wichtig: Wir schreiben eine project.yml, die zu DEINER Repo-Struktur passt
+      # (Swift-Dateien + Info.plist liegen im Root neben den Ordnern Views, Models, Services, etc.)
+      - name: Provide project.yml (matches current repo layout)
+        script: |
+          cat > project.yml <<'YML'
+          name: TendersApp
+          options:
+            bundleIdPrefix: com.aaron.schmidt
+          targets:
+            TendersApp:
+              type: application
+              platform: iOS
+              deploymentTarget: "16.0"
+              sources:
+                - path: .
+              info:
+                path: Info.plist
+              settings:
+                PRODUCT_BUNDLE_IDENTIFIER: com.aaron.schmidt.tenders
+                CODE_SIGN_STYLE: Manual
+          YML
+          cat project.yml
+
       - name: Generate Xcode project
+        script: xcodegen generate
+
+      # Build für iPhoneOS OHNE Codesigning, damit wir eine unsignierte .app erhalten
+      - name: Build Release (no code signing)
         script: |
-          xcodegen generate
-          ls -la
-      - name: Increment build number
-        script: |
-          cd TendersApp
-          agvtool new-version -all $BUILD_NUMBER
-      - name: Resolve signing (automatic via API key)
-        script: |
-          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
-          keychain initialize
-          keychain add-certificates
-      - name: Archive
-        script: |
-          xcodebuild -project TendersApp.xcodeproj \
+          set -e
+          DERIVED="$CM_BUILD_DIR/DerivedData"
+          xcodebuild \
+            -project TendersApp.xcodeproj \
             -scheme "$SCHEME" \
-            -configuration "$CONFIGURATION" \
-            -destination 'generic/platform=iOS' \
-            -archivePath $CM_BUILD_DIR/TendersApp.xcarchive \
-            clean archive | xcpretty
-      - name: Export IPA
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath "$DERIVED" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build | xcpretty
+          echo "DERIVED=$DERIVED" >> $CM_ENV
+
+      # .app finden und zu einer *unsignierten* .ipa packen (Payload.zip)
+      - name: Package unsigned .ipa
         script: |
-          cat > ExportOptions.plist <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0"><dict>
-            <key>compileBitcode</key><false/>
-            <key>method</key><string>app-store</string>
-            <key>signingStyle</key><string>automatic</string>
-            <key>destination</key><string>export</string>
-            <key>stripSwiftSymbols</key><true/>
-            <key>teamID</key><string>YOUR_TEAM_ID</string>
-          </dict></plist>
-          EOF
-          xcodebuild -exportArchive \
-            -archivePath $CM_BUILD_DIR/TendersApp.xcarchive \
-            -exportOptionsPlist ExportOptions.plist \
-            -exportPath $CM_OUTPUT_DIR | xcpretty
+          set -e
+          APP_PATH=$(find "$DERIVED/Build/Products/Release-iphoneos" -maxdepth 1 -type d -name "*.app" | head -n 1)
+          echo "Found app at: $APP_PATH"
+          mkdir -p "$CM_BUILD_DIR/Payload"
+          cp -R "$APP_PATH" "$CM_BUILD_DIR/Payload/TendersApp.app"
+          (cd "$CM_BUILD_DIR" && zip -qry "TendersApp-unsigned.ipa" Payload)
+
     artifacts:
-      - $CM_OUTPUT_DIR/*.ipa
-      - $CM_BUILD_DIR/TendersApp.xcarchive
-    publishing:
-      email:
-        recipients:
-          - aaron.schmidt.consulting@gmail.com
+      - $CM_BUILD_DIR/TendersApp-unsigned.ipa
+      - $CM_BUILD_DIR/DerivedData/Build/Products/Release-iphoneos/*.app
