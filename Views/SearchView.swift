@@ -42,7 +42,8 @@ struct SearchView: View {
                     .padding()
                 } else {
                     List {
-                        ForEach(viewModel.rankedResults) { tender in
+                        // WICHTIG: id: \.id zwingt die richtige ForEach-Variante
+                        ForEach(viewModel.rankedResults, id: \.id) { tender in
                             NavigationLink(
                                 destination: TenderDetailView(tender: tender)
                             ) {
@@ -106,7 +107,7 @@ struct SearchView: View {
                     Button {
                         saveSearchName = ""
                         showingSaveSheet = true
-                    } label: { Image(systemName: "bookmark") }
+                    } label: { Image(systemImage: "bookmark") }
                     .accessibilityLabel("Suche speichern")
                 }
             }
