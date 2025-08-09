@@ -5,7 +5,7 @@ workflows:
     max_build_duration: 60
     environment:
       groups:
-        - app-secrets        # enthält OPENAI_API_KEY / SERP_API_KEY / BING_API_KEY
+        - app-secrets            # OPENAI_API_KEY / SERP_API_KEY / BING_API_KEY
       vars:
         XCODE_SCHEME: TendersApp
     cache:
@@ -35,34 +35,70 @@ workflows:
       - name: Locate Xcode project / workspace and scheme
         script: |
           set -euo pipefail
-          shopt -s nullglob
-          PROJ=""
-          if compgen -G "*.xcworkspace" > /dev/null; then
-            PROJ="$(ls -1 *.xcworkspace | head -n1)"
-          elif compgen -G "*.xcodeproj" > /dev/null; then
-            PROJ="$(ls -1 *.xcodeproj | head -n1)"
-          else
-            echo "No .xcworkspace or .xcodeproj found in repository."
-            exit 66
-          fi
+
+          # Helper, der IMMER eine gültige .xcworkspace oder .xcodeproj zurückgibt
+          find_project() {
+            # 1) Bevorzuge .xcworkspace im Repo-Root
+            local ws
+            ws="$(/usr/bin/find . -maxdepth 1 -type d -name '*.xcworkspace' -print -quit || true)"
+            if [ -n "$ws" ]; then
+              echo "${ws#./}"
+              return 0
+            fi
+            # 2) Dann .xcodeproj im Repo-Root
+            local pj
+            pj="$(/usr/bin/find . -maxdepth 1 -type d -name '*.xcodeproj' -print -quit || true)"
+            if [ -n "$pj" ]; then
+              echo "${pj#./}"
+              return 0
+            fi
+            # 3) Falls fälschlich eine project.pbxproj gefunden wurde, nimm den übergeordneten .xcodeproj
+            local pbx
+            pbx="$(/usr/bin/find . -type f -path './*.xcodeproj/project.pbxproj' -print -quit || true)"
+            if [ -n "$pbx" ]; then
+              echo "$(dirname "${pbx#./}")"
+              return 0
+            fi
+            return 1
+          }
+
+          PROJ="$(find_project)" || { echo "No .xcworkspace or .xcodeproj found in repository."; exit 66; }
+
           echo "Found project: $PROJ (scheme: ${XCODE_SCHEME})"
           # Für spätere Schritte persistent machen
-          echo "export PROJECT_PATH='$PROJ'" >> "$CM_ENV"
-          echo "export XCODE_SCHEME='${XCODE_SCHEME}'" >> "$CM_ENV"
+          printf "export PROJECT_PATH=%q\n" "$PROJ" >> "$CM_ENV"
+          printf "export XCODE_SCHEME=%q\n" "${XCODE_SCHEME}" >> "$CM_ENV"
 
       - name: Resolve Swift Package dependencies (if any)
         script: |
           set -euo pipefail
           source "$CM_ENV" || true
-          PROJ="${PROJECT_PATH:-}"
+
+          normalize_proj() {
+            local p="$1"
+            # Wenn fälschlich eine project.pbxproj übergeben wurde, gehe eine Ebene hoch
+            case "$p" in
+              *.pbxproj)
+                p="$(dirname "$p")"   # -> *.xcodeproj
+                ;;
+            esac
+            echo "$p"
+          }
+
+          PROJ="$(normalize_proj "${PROJECT_PATH:-}")"
           if [ -z "$PROJ" ]; then
+            # Fallback: erneut suchen
             if compgen -G "*.xcworkspace" > /dev/null; then
               PROJ="$(ls -1 *.xcworkspace | head -n1)"
-            else
+            elif compgen -G "*.xcodeproj" > /dev/null; then
               PROJ="$(ls -1 *.xcodeproj | head -n1)"
+            else
+              echo "No project found."
+              exit 66
             fi
           fi
           echo "Using project: $PROJ"
+
           if [[ "$PROJ" == *.xcworkspace ]]; then
             xcodebuild -resolvePackageDependencies -workspace "$PROJ" -scheme "$XCODE_SCHEME"
           else
@@ -73,7 +109,16 @@ workflows:
         script: |
           set -euo pipefail
           source "$CM_ENV" || true
-          PROJ="${PROJECT_PATH:-}"
+
+          normalize_proj() {
+            local p="$1"
+            case "$p" in
+              *.pbxproj) p="$(dirname "$p")" ;;
+            esac
+            echo "$p"
+          }
+
+          PROJ="$(normalize_proj "${PROJECT_PATH:-}")"
           if [ -z "$PROJ" ]; then
             if compgen -G "*.xcworkspace" > /dev/null; then
               PROJ="$(ls -1 *.xcworkspace | head -n1)"
@@ -81,6 +126,8 @@ workflows:
               PROJ="$(ls -1 *.xcodeproj | head -n1)"
             fi
           fi
+          echo "Building: $PROJ (scheme: $XCODE_SCHEME)"
+
           if [[ "$PROJ" == *.xcworkspace ]]; then
             xcodebuild -workspace "$PROJ" -scheme "$XCODE_SCHEME" -configuration Release -sdk iphoneos CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
           else
@@ -92,3 +139,4 @@ workflows:
       - DerivedData/Build/Products/Release-iphoneos/*.ipa
       - DerivedData/**/Build/Intermediates.noindex/**/*.xcactivitylog
       - $CM_ENV
+
