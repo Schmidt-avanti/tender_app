@@ -21,12 +21,11 @@ private struct TedSearchResponse: Decodable {
 }
 
 /// HTTP-Client für TED Europa (ohne API-Key).
-/// Nutzt POST /v3/notices/search mit dem Feld **query** (nicht: q/expertQuery).
+/// Ruft POST /v3/notices/search auf. Body: query + page/limit + fields (Pflicht).
 final class APIClient {
     static let shared = APIClient()
     private init() {}
 
-    /// Kombiniert die UI-Filter in eine „expert query“ und ruft die TED-Suche auf.
     func search(filters: SearchFilters) -> AnyPublisher<[Tender], Error> {
 
         // 1) Expert-Query aus Filtern bauen
@@ -51,12 +50,13 @@ final class APIClient {
             ? "type:contract-notice OR type:contract-award"
             : terms.joined(separator: " AND ")
 
-        // 2) KORREKT: Feld heißt "query"
+        // 2) Korrektes Request-Format: "query" + minimale "fields"
+        //    KEINE verschachtelten Dot-Felder (z. B. "links.pdf") – das führt zu Validierungsfehlern.
         let body: [String: Any] = [
             "query": expert,
             "page": 1,
-            "limit": 25
-            // Hinweis: 'fields' weggelassen – einige Gateways reagieren darauf allergisch
+            "limit": 25,
+            "fields": ["id", "title", "publicationDate", "buyerCountry", "links"]
         ]
 
         guard let url = URL(string: "https://api.ted.europa.eu/v3/notices/search") else {
@@ -66,7 +66,6 @@ final class APIClient {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        // harmlose Header für stabilere Gateways
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue("TendersApp/1.0 (iOS)", forHTTPHeaderField: "User-Agent")
 
@@ -83,7 +82,6 @@ final class APIClient {
                     throw URLError(.badServerResponse)
                 }
                 guard (200..<300).contains(http.statusCode) else {
-                    // Fehlermeldung aus Body extrahieren (hilfreich fürs UI)
                     let msg = String(data: out.data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
                     throw NSError(domain: "TEDSearch", code: http.statusCode,
                                   userInfo: [NSLocalizedDescriptionKey: msg])
@@ -102,8 +100,8 @@ final class APIClient {
                         cpv: [],
                         country: n.buyerCountry,
                         city: nil,
-                        deadline: nil,          // (optional in Phase 2)
-                        valueEstimate: nil,     // (optional in Phase 2)
+                        deadline: nil,
+                        valueEstimate: nil,
                         url: urlStr.flatMap(URL.init(string:))
                     )
                 }
@@ -112,7 +110,7 @@ final class APIClient {
             .eraseToAnyPublisher()
     }
 
-    /// Async/Await-Wrapper für Stellen im Code, die await verwenden.
+    /// Async/Await-Wrapper
     func asyncSearch(filters: SearchFilters) async throws -> [Tender] {
         try await withCheckedThrowingContinuation { cont in
             var cancellable: AnyCancellable?
