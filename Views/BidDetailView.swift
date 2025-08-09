@@ -62,15 +62,16 @@ struct BidDetailView: View {
         valueEstimate: 100000,
         url: URL(string: "https://ted.europa.eu")
     )
+
     let sampleBid = Bid(
         id: "bid-1",
         tender: sampleTender,
-        createdAt: Date(),
-        status: .draft
+        status: .preparing,
+        createdAt: Date()
     )
-    NavigationStack {
+
+    return NavigationStack {
         BidDetailView(bid: sampleBid)
             .environmentObject(BidManager.shared)
     }
 }
-
