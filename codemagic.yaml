@@ -1,68 +1,33 @@
 workflows:
   ios_unsigned_ipa:
-    name: iOS unsigned IPA (for Sideloadly)
+    name: Build unsigned IPA for Sideloadly
     max_build_duration: 60
     environment:
       xcode: 15.4
-      vars:
-        SCHEME: TendersApp
-        BUNDLE_ID: com.aaron.schmidt.tenders
+    vars:
+      SCHEME: TendersApp
+      BUNDLE_ID: com.aaron.schmidt.tenders
     scripts:
-      - name: Install tools
+      - name: Install Xcode project dependencies
         script: |
-          brew install xcodegen xcpretty
-
-      # Wichtig: Wir schreiben eine project.yml, die zu DEINER Repo-Struktur passt
-      # (Swift-Dateien + Info.plist liegen im Root neben den Ordnern Views, Models, Services, etc.)
-      - name: Provide project.yml (matches current repo layout)
+          gem install cocoapods
+          pod install --repo-update || pod install
+      - name: Build unsigned IPA
         script: |
-          cat > project.yml <<'YML'
-          name: TendersApp
-          options:
-            bundleIdPrefix: com.aaron.schmidt
-          targets:
-            TendersApp:
-              type: application
-              platform: iOS
-              deploymentTarget: "16.0"
-              sources:
-                - path: .
-              info:
-                path: Info.plist
-              settings:
-                PRODUCT_BUNDLE_IDENTIFIER: com.aaron.schmidt.tenders
-                CODE_SIGN_STYLE: Manual
-          YML
-          cat project.yml
-
-      - name: Generate Xcode project
-        script: xcodegen generate
-
-      # Build für iPhoneOS OHNE Codesigning, damit wir eine unsignierte .app erhalten
-      - name: Build Release (no code signing)
-        script: |
-          set -e
-          DERIVED="$CM_BUILD_DIR/DerivedData"
-          xcodebuild \
-            -project TendersApp.xcodeproj \
-            -scheme "$SCHEME" \
-            -configuration Release \
-            -sdk iphoneos \
-            -derivedDataPath "$DERIVED" \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            build | xcpretty
-          echo "DERIVED=$DERIVED" >> $CM_ENV
-
-      # .app finden und zu einer *unsignierten* .ipa packen (Payload.zip)
-      - name: Package unsigned .ipa
-        script: |
-          set -e
-          APP_PATH=$(find "$DERIVED/Build/Products/Release-iphoneos" -maxdepth 1 -type d -name "*.app" | head -n 1)
-          echo "Found app at: $APP_PATH"
-          mkdir -p "$CM_BUILD_DIR/Payload"
-          cp -R "$APP_PATH" "$CM_BUILD_DIR/Payload/TendersApp.app"
-          (cd "$CM_BUILD_DIR" && zip -qry "TendersApp-unsigned.ipa" Payload)
-
+          xcodebuild -scheme "$SCHEME" \
+          -configuration Release \
+          -sdk iphoneos \
+          -archivePath $CM_BUILD_DIR/Build.xcarchive \
+          archive CODE_SIGNING_ALLOWED=NO
+          xcodebuild -exportArchive \
+          -archivePath $CM_BUILD_DIR/Build.xcarchive \
+          -exportOptionsPlist /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/Library/Xcode/Templates/Project\ Templates/iOS/Application\ with\ WatchKit\ App.xctemplate/ExportOptions.plist \
+          -exportPath $CM_BUILD_DIR/ipa \
+          CODE_SIGNING_ALLOWED=NO
     artifacts:
-      - $CM_BUILD_DIR/TendersApp-unsigned.ipa
-      - $CM_BUILD_DIR/DerivedData/Build/Products/Release-iphoneos/*.app
+      - ipa
+      - dSYM
+    publishing:
+      email:
+        recipients:
+          - aaron.schmidt.consulting@gmail.com
