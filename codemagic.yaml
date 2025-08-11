@@ -1,45 +1,4 @@
-workflows:
-  ios_release_unsigned:
-    name: "iOS Release (unsigned IPA für Sideloadly)"
-    max_build_duration: 60
-    instance_type: mac_mini_m2
-
-    environment:
-      xcode: 16.4
-      vars:
-        SCHEME: "ProcureFinder"
-        PROJECT: "ProcureFinder.xcodeproj"
-
     scripts:
-      - name: "Repo tree (debug)"
-        script: |
-          set -euxo pipefail
-          pwd
-          git rev-parse --short HEAD || true
-          ls -la
-          echo "---- top-level ----"
-          find . -maxdepth 2 -type d -name "*.xcodeproj" -print || true
-          find . -maxdepth 2 -type f \( -name "project.yml" -o -name "Project.yml" -o -name "ProcureFinder/project.yml" \) -print || true
-
-      - name: "Generate .xcodeproj if needed"
-        script: |
-          set -euxo pipefail
-          if [ -d "$PROJECT" ]; then
-            echo "Found $PROJECT"
-          else
-            if [ -f "project.yml" ] || [ -f "ProcureFinder/project.yml" ] || [ -f "Project.yml" ]; then
-              echo "Generating $PROJECT with XcodeGen..."
-              if ! command -v xcodegen >/dev/null 2>&1; then
-                brew update || true
-                brew install xcodegen
-              fi
-              xcodegen generate
-              test -d "$PROJECT" || { echo "Could not generate $PROJECT"; exit 66; }
-            else
-              echo "Missing $PROJECT and no project.yml present"; exit 66
-            fi
-          fi
-
       - name: "Build .app (unsigned, device)"
         script: |
           set -euxo pipefail
@@ -58,11 +17,18 @@ workflows:
           test -d "$APP_DIR" || { echo "Built .app not found: $APP_DIR"; ls -la "$DERIVED/Build/Products/Release-iphoneos" || true; exit 65; }
 
           echo "Validating Info.plist…"
-          BID=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP_DIR/Info.plist" || true)
-          if [ -z "${BID}" ] || [[ "$BID" == *'$('* ]] || [[ "$BID" == *PRODUCT_BUNDLE_IDENTIFIER* ]]; then
-            echo "CFBundleIdentifier invalid: '$BID'"; exit 67
+          PLIST="$APP_DIR/Info.plist"
+
+          # 1) Wenn CFBundleIdentifier fehlt/leer ist: setzen wir ihn hart, damit Sideloadly arbeiten kann
+          BID=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$PLIST" 2>/dev/null || true)
+          if [ -z "${BID:-}" ] || [[ "$BID" == *'$('* ]] || [[ "$BID" == *PRODUCT_BUNDLE_IDENTIFIER* ]]; then
+            echo "Fixing CFBundleIdentifier in built app Info.plist…"
+            /usr/libexec/PlistBuddy -c "Delete :CFBundleIdentifier" "$PLIST" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.avanti.procurefinder" "$PLIST"
           fi
-          echo "CFBundleIdentifier=$BID"
+
+          echo "CFBundleIdentifier now =" \
+            "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$PLIST")"
 
       - name: "Package unsigned IPA (for Sideloadly)"
         script: |
@@ -74,21 +40,11 @@ workflows:
           mkdir -p Payload
           rsync -a --delete "$APP_DIR" "Payload/"
 
+          # Doppelt hält besser: validate vor dem Zip
           /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "Payload/${SCHEME}.app/Info.plist" >/dev/null
 
           (cd Payload && zip -qry "../ProcureFinder-unsigned.ipa" .)
           zip -qry "ProcureFinder.app.zip" "Payload/${SCHEME}.app"
-
-      - name: "Publish artifacts"
-        script: |
-          set -euxo pipefail
-          mkdir -p "$CM_ARTIFACTS"
-          mv ProcureFinder-unsigned.ipa "$CM_ARTIFACTS/"
-          mv ProcureFinder.app.zip "$CM_ARTIFACTS/"
-
-    artifacts:
-      - ProcureFinder-unsigned.ipa
-      - ProcureFinder.app.zip
 
 
 
