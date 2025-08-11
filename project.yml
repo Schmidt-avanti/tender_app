@@ -1,31 +1,47 @@
 name: ProcureFinder
+
 options:
+  minimumXcodeGenVersion: 2.37.0
   deploymentTarget:
     iOS: "16.0"
-  minimumXcodeGenVersion: 2.37.0
 
-packages: {}
+settings:
+  base:
+    SWIFT_VERSION: 5.0
+    IPHONEOS_DEPLOYMENT_TARGET: 16.0
+    PRODUCT_NAME: ProcureFinder
 
 targets:
   ProcureFinder:
     type: application
     platform: iOS
+    deploymentTarget: "16.0"
     sources:
       - path: ProcureFinder/Sources
-      - path: ProcureFinder/Resources
-        excludes:
-          - LaunchScreen.storyboard
-        includes:
-          - Assets.xcassets
-          - cpv.json
+      - path: ProcureFinder/Resources/Assets.xcassets
+        type: folder
+      - path: ProcureFinder/Resources/LaunchScreen.storyboard
+        type: file
+      - path: ProcureFinder/Resources/cpv.json
+        type: file
+    resources:
+      - ProcureFinder/Resources/Assets.xcassets
+      - ProcureFinder/Resources/LaunchScreen.storyboard
+      - ProcureFinder/Resources/cpv.json
+    info:
+      path: ProcureFinder/Info.plist
     settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.avanti.procurefinder
-        DEVELOPMENT_TEAM: ""
-        SWIFT_VERSION: 5.9
-        INFOPLIST_FILE: ProcureFinder/Info.plist
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      PRODUCT_BUNDLE_IDENTIFIER: com.avanti.procurefinder
+      ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      CURRENT_PROJECT_VERSION: 1
+      MARKETING_VERSION: 1.0.0
+      # build in Codemagic ohne Codesigning
+      CODE_SIGN_STYLE: Manual
+      CODE_SIGNING_REQUIRED: NO
+      CODE_SIGNING_ALLOWED: NO
+      DEVELOPMENT_TEAM: ""
     scheme:
+      gatherCoverageData: false
       testTargets:
         - ProcureFinderTests
         - ProcureFinderUITests
@@ -33,13 +49,17 @@ targets:
   ProcureFinderTests:
     type: bundle.unit-test
     platform: iOS
-    sources: [ProcureFinderTests]
+    deploymentTarget: "16.0"
+    sources:
+      - ProcureFinderTests
     dependencies:
       - target: ProcureFinder
 
   ProcureFinderUITests:
     type: bundle.ui-testing
     platform: iOS
-    sources: [ProcureFinderUITests]
+    deploymentTarget: "16.0"
+    sources:
+      - ProcureFinderUITests
     dependencies:
       - target: ProcureFinder
