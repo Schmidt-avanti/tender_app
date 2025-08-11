@@ -18,12 +18,13 @@ workflows:
           brew install xcodegen || true
           xcodegen --version
 
-      - name: Generate Xcode project from project.yml
+      - name: Generate Xcode project from project.yml (force)
         script: |
-          if [ -f project.yml ]; then
-            xcodegen generate
-          fi
-          test -d ProcureFinder.xcodeproj || { echo "ProcureFinder.xcodeproj missing"; exit 1; }
+          set -e
+          test -f project.yml || { echo "project.yml missing in repo root"; exit 1; }
+          rm -rf ProcureFinder.xcodeproj
+          xcodegen generate
+          test -d ProcureFinder.xcodeproj || { echo "Failed to generate ProcureFinder.xcodeproj"; exit 1; }
 
       - name: Set build number
         script: |
@@ -77,23 +78,8 @@ workflows:
             EXPORT_PLIST="$BUILD_DIR/exportOptions.plist"
             /usr/libexec/PlistBuddy -c 'Clear dict' "$EXPORT_PLIST" 2>/dev/null || true
             /usr/libexec/PlistBuddy -c 'Add :method string ad-hoc' "$EXPORT_PLIST"
-            /usr/libexec/PlistBuddy -c 'Add :compileBitcode bool false' "$EXPORT_PLIST"
-            /usr/libexec/PlistBuddy -c 'Add :stripSwiftSymbols bool true' "$EXPORT_PLIST"
-            /usr/libexec/PlistBuddy -c 'Add :destination string export' "$EXPORT_PLIST"
-            /usr/libexec/PlistBuddy -c 'Add :thinning string <none>' "$EXPORT_PLIST"
+            /usr/libexec/PlistBuddy -c '
 
-            xcodebuild -exportArchive \
-              -archivePath "$ARCHIVE_PATH" \
-              -exportPath "$OUT_DIR" \
-              -exportOptionsPlist "$EXPORT_PLIST" \
-              -allowProvisioningUpdates | tee "$LOG_PATH"
-          else
-            echo "No archive -> package UNSIGNED IPA for Sideloadly"
-            if [ ! -d "$APP_PATH" ]; then
-              echo "ERROR: App bundle not found at $APP_PATH"
-              exit 1
-            fi
-            PAYLOAD_DIR="_
 
 
 
