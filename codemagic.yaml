@@ -14,11 +14,10 @@ workflows:
         script: |
           set -e
           echo "PWD: $(pwd)"
-          echo "Xcode:"
           xcodebuild -version
-          echo "Baum (Top-Level):"
+          echo "Top-Level:"
           ls -la
-          echo "Suche nach project.yml:"
+          echo "Suche project.yml:"
           find . -maxdepth 3 -name "project.yml" -print
 
       - name: XcodeGen installieren (robust, mit Fallback)
@@ -27,16 +26,10 @@ workflows:
           export PATH="$HOME/.local/bin:$PATH"
           mkdir -p "$HOME/.local/bin"
 
-          need_xg=1
-          if command -v xcodegen >/dev/null 2>&1; then
-            xcodegen --version || true
-            need_xg=0
-          fi
-
-          if [ "$need_xg" = "1" ]; then
+          if ! command -v xcodegen >/dev/null 2>&1; then
             if command -v brew >/dev/null 2>&1; then
               export HOMEBREW_NO_AUTO_UPDATE=1
-              (brew list xcodegen >/dev/null 2>&1 && echo "XcodeGen via brew bereits installiert") || brew install xcodegen || brew reinstall xcodegen || true
+              brew list xcodegen >/dev/null 2>&1 || brew install xcodegen || brew reinstall xcodegen || true
             fi
           fi
 
@@ -49,32 +42,27 @@ workflows:
             chmod +x "$HOME/.local/bin/xcodegen" || true
           fi
 
-          echo "XcodeGen Version:"
           xcodegen --version
 
       - name: .xcodeproj generieren (aus project.yml)
         script: |
           set -euo pipefail
-          # Alte Projektdatei ggf. entfernen, damit wir garantiert frisch generieren
           rm -rf ProcureFinder.xcodeproj || true
 
           SPEC_PATH="$(find "$CM_BUILD_DIR" -maxdepth 3 -name "project.yml" -print | head -n1 || true)"
           if [ -z "${SPEC_PATH:-}" ]; then
-            echo "FEHLER: project.yml nicht gefunden. Bitte ins Repo legen (Root oder Unterordner)."
+            echo "FEHLER: project.yml nicht gefunden. Bitte ins Repo legen."
             exit 1
           fi
           SPEC_DIR="$(cd "$(dirname "$SPEC_PATH")" && pwd)"
           echo "Gefundene project.yml: $SPEC_PATH"
-          echo "Wechsle nach: $SPEC_DIR"
           cd "$SPEC_DIR"
 
           xcodegen generate --spec "$SPEC_PATH"
 
-          # Erwarteter Projektpfad
           PROJECT_PATH="$SPEC_DIR/ProcureFinder.xcodeproj"
           if [ ! -d "$PROJECT_PATH" ]; then
             echo "FEHLER: XcodeGen hat $PROJECT_PATH nicht erstellt."
-            echo "Verfügbare .xcodeproj-Dateien:"
             find "$SPEC_DIR" -maxdepth 2 -name "*.xcodeproj" -print || true
             exit 1
           fi
@@ -89,9 +77,7 @@ workflows:
           if [ ! -f "$ICONCONTENTS" ]; then
             echo "AppIcon-Contents fehlt – lege Minimaldatei an."
             mkdir -p "$(dirname "$ICONCONTENTS")"
-            cat > "$ICONCONTENTS" << 'JSON'
-            { "images": [], "info": { "version": 1, "author": "xcode" } }
-            JSON
+            printf '%s\n' '{ "images": [], "info": { "version": 1, "author": "xcode" } }' > "$ICONCONTENTS"
           fi
 
       - name: Build .app (unsigned, für Gerät)
