@@ -1,19 +1,22 @@
 import Foundation
 
-/// Centralized TED endpoints + direct-link helpers.
-enum TedEndpoints {
-    static let base = URL(string: "https://ted.europa.eu")!
-    static let apiBase = URL(string: "https://ted.europa.eu/api")!
+/// Offizielle TED-Endpoints (statisch, keine Initialisierung nötig)
+public enum TedEndpoints {
+    /// Basis (Host)
+    public static let base = URL(string: "https://ted.europa.eu")!
 
-    /// Search API v3
-    static var search: URL { apiBase.appendingPathComponent("v3/notices/search") }
-
-    /// Build official direct links per TED schema:
-    /// https://ted.europa.eu/{lang}/notice/{publication-number}/{format}
-    static func htmlLink(publicationNumber: String, lang: String = Locale.current.language.languageCode?.identifier ?? "de") -> URL {
-        base.appendingPathComponent("\(lang)/notice/\(publicationNumber)/html")
+    /// Search-POST (anonym nutzbar)
+    public static var search: URL {
+        base.appendingPathComponent("/api/v3/notices/search")
     }
-    static func pdfLink(publicationNumber: String, lang: String = Locale.current.language.languageCode?.identifier ?? "de", signed: Bool = false) -> URL {
-        base.appendingPathComponent("\(lang)/notice/\(publicationNumber)/" + (signed ? "pdfs" : "pdf"))
+
+    /// Direktlink (HTML) – Schema siehe README
+    public static func html(lang: String, publicationNumber: String) -> URL? {
+        URL(string: "https://ted.europa.eu/\(lang)/notice/\(publicationNumber)/html")
+    }
+
+    /// Direktlink (PDF) – Schema siehe README
+    public static func pdf(lang: String, publicationNumber: String) -> URL? {
+        URL(string: "https://ted.europa.eu/\(lang)/notice/\(publicationNumber)/pdf")
     }
 }
