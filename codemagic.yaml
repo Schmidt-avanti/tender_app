@@ -20,7 +20,7 @@ workflows:
       - name: Generate App Icons
         script: |
           python3 scripts/gen_app_icons.py
-      - name: Create export options
+      - name: Create export options (for signed export)
         script: |
           cat > exportOptions.plist <<'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
@@ -38,14 +38,32 @@ workflows:
         script: |
           BUILD_NUMBER=$(date +%s)
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "ProcureFinder/Info.plist"
-      - name: Build archive
-        script: |
-          set -e
-          xcodebuild -project ProcureFinder.xcodeproj -scheme ProcureFinder -configuration Release -sdk iphoneos -destination generic/platform=iOS clean archive -archivePath build/ProcureFinder.xcarchive CODE_SIGN_STYLE=Manual || true
-      - name: Sign and export IPA
+
+      # === Build ===
+      - name: Build (signed archive if vars present, else unsigned app)
         script: |
           set -e
           if [ -n "$CM_CERTIFICATE" ] && [ -n "$CM_PROVISIONING_PROFILE" ]; then
+            # Signed ARCHIVE build (for direct signed IPA export)
+            xcodebuild -project ProcureFinder.xcodeproj \
+              -scheme ProcureFinder -configuration Release -sdk iphoneos \
+              -destination generic/platform=iOS \
+              clean archive -archivePath build/ProcureFinder.xcarchive
+          else
+            # UNSIGNED device build (for Sideloadly)
+            xcodebuild -project ProcureFinder.xcodeproj \
+              -scheme ProcureFinder -configuration Release -sdk iphoneos \
+              -destination generic/platform=iOS \
+              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGNING_IDENTITY="" \
+              clean build -derivedDataPath build/Derived
+          fi
+
+      # === Export / Package ===
+      - name: Export IPA (signed if vars present, else create unsigned IPA)
+        script: |
+          set -e
+          if [ -n "$CM_CERTIFICATE" ] && [ -n "$CM_PROVISIONING_PROFILE" ]; then
+            # Import signing material
             echo "$CM_CERTIFICATE" | base64 --decode > /tmp/cert.p12
             echo "$CM_PROVISIONING_PROFILE" | base64 --decode > /tmp/profile.mobileprovision
             KEYCHAIN=build.keychain
@@ -55,10 +73,24 @@ workflows:
             security unlock-keychain -p "" $KEYCHAIN
             mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
             cp /tmp/profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
+
+            # Export signed IPA from archive
+            xcodebuild -exportArchive \
+              -archivePath build/ProcureFinder.xcarchive \
+              -exportOptionsPlist exportOptions.plist \
+              -exportPath build/ipa
+          else
+            # Package UNSIGNED .ipa for Sideloadly
+            APP_DIR="build/Derived/Build/Products/Release-iphoneos"
+            mkdir -p build/Payload
+            cp -R "$APP_DIR/ProcureFinder.app" build/Payload/ProcureFinder.app
+            (cd build && zip -r ProcureFinder-unsigned.ipa Payload)
           fi
-          xcodebuild -exportArchive -archivePath build/ProcureFinder.xcarchive -exportOptionsPlist exportOptions.plist -exportPath build/ipa
     artifacts:
       - build/ipa/*.ipa
+      - build/ProcureFinder-unsigned.ipa
+      - build/Derived/Build/Products/Release-iphoneos/ProcureFinder.app
       - build/ProcureFinder.xcarchive
       - xcodebuild.log
+
 
