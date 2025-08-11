@@ -1,56 +1,50 @@
 workflows:
   ios_release:
     name: iOS Release
+    max_build_duration: 60
     environment:
-      vars:
-        XCODEGEN_VERSION: "2.37.0"
-        BUNDLE_ID: "com.avanti.procurefinder"
-        APP_NAME: "ProcureFinder"
-      xcode: "15.4"
-    triggering:
-      events:
-        - push
+      xcode: 15.4
     scripts:
-      - name: Install tools
+      - name: Show repo tree (debug)
+        script: |
+          echo "PWD: $(pwd)"
+          ls -la
+          echo "----"
+          ls -la ProcureFinder || true
+
+      - name: Install XcodeGen
         script: |
           brew install xcodegen || true
-      - name: Generate Xcode project
+          xcodegen --version
+
+      - name: Generate Xcode project from project.yml
         script: |
+          # Safety: remove prebuilt xcodeproj if someone checked it in
+          rm -rf ProcureFinder.xcodeproj
+          test -f project.yml || { echo "project.yml not found at repo root"; exit 1; }
           xcodegen generate --spec project.yml
-      - name: Generate App Icons
-        script: |
-          python3 scripts/gen_app_icons.py
-      - name: Create export options (for signed export)
-        script: |
-          cat > exportOptions.plist <<'PLIST'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key><string>ad-hoc</string>
-            <key>compileBitcode</key><false/>
-            <key>signingStyle</key><string>manual</string>
-            <key>stripSwiftSymbols</key><true/>
-          </dict>
-          </plist>
-          PLIST
+          test -d ProcureFinder.xcodeproj || { echo "xcodeproj not generated"; exit 1; }
+
       - name: Set build number
         script: |
           BUILD_NUMBER=$(date +%s)
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "ProcureFinder/Info.plist"
 
-      # === Build ===
-      - name: Build (signed archive if vars present, else unsigned app)
+      - name: Generate App Icons
         script: |
-          set -e
-          if [ -n "$CM_CERTIFICATE" ] && [ -n "$CM_PROVISIONING_PROFILE" ]; then
-            # Signed ARCHIVE build (for direct signed IPA export)
+          python3 scripts/gen_app_icons.py
+
+      - name: Build (unsigned device build by default; signed archive if vars present)
+        script: |
+          set -euo pipefail
+          if [ -n "${CM_CERTIFICATE:-}" ] && [ -n "${CM_PROVISIONING_PROFILE:-}" ]; then
+            echo ">> Signed ARCHIVE path"
             xcodebuild -project ProcureFinder.xcodeproj \
               -scheme ProcureFinder -configuration Release -sdk iphoneos \
               -destination generic/platform=iOS \
               clean archive -archivePath build/ProcureFinder.xcarchive
           else
-            # UNSIGNED device build (for Sideloadly)
+            echo ">> UNSIGNED device build path"
             xcodebuild -project ProcureFinder.xcodeproj \
               -scheme ProcureFinder -configuration Release -sdk iphoneos \
               -destination generic/platform=iOS \
@@ -58,39 +52,51 @@ workflows:
               clean build -derivedDataPath build/Derived
           fi
 
-      # === Export / Package ===
-      - name: Export IPA (signed if vars present, else create unsigned IPA)
+      - name: Export / Package IPA
         script: |
-          set -e
-          if [ -n "$CM_CERTIFICATE" ] && [ -n "$CM_PROVISIONING_PROFILE" ]; then
-            # Import signing material
+          set -euo pipefail
+          if [ -n "${CM_CERTIFICATE:-}" ] && [ -n "${CM_PROVISIONING_PROFILE:-}" ]; then
             echo "$CM_CERTIFICATE" | base64 --decode > /tmp/cert.p12
             echo "$CM_PROVISIONING_PROFILE" | base64 --decode > /tmp/profile.mobileprovision
             KEYCHAIN=build.keychain
             security create-keychain -p "" $KEYCHAIN
-            security import /tmp/cert.p12 -k $KEYCHAIN -P "$CM_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+            security import /tmp/cert.p12 -k $KEYCHAIN -P "${CM_CERTIFICATE_PASSWORD:-}" -T /usr/bin/codesign
             security default-keychain -s $KEYCHAIN
             security unlock-keychain -p "" $KEYCHAIN
             mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
             cp /tmp/profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
 
-            # Export signed IPA from archive
+            cat > exportOptions.plist <<'PLIST'
+            <?xml version="1.0" encoding="UTF-8"?>
+            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+            <plist version="1.0">
+            <dict>
+              <key>method</key><string>ad-hoc</string>
+              <key>compileBitcode</key><false/>
+              <key>signingStyle</key><string>manual</string>
+              <key>stripSwiftSymbols</key><true/>
+            </dict>
+            </plist>
+            PLIST
+
             xcodebuild -exportArchive \
               -archivePath build/ProcureFinder.xcarchive \
               -exportOptionsPlist exportOptions.plist \
               -exportPath build/ipa
           else
-            # Package UNSIGNED .ipa for Sideloadly
             APP_DIR="build/Derived/Build/Products/Release-iphoneos"
+            APP_PATH="$APP_DIR/ProcureFinder.app"
+            test -d "$APP_PATH" || { echo "App not found at $APP_PATH"; ls -la "$APP_DIR"; exit 1; }
             mkdir -p build/Payload
-            cp -R "$APP_DIR/ProcureFinder.app" build/Payload/ProcureFinder.app
-            (cd build && zip -r ProcureFinder-unsigned.ipa Payload)
+            cp -R "$APP_PATH" build/Payload/ProcureFinder.app
+            (cd build && zip -qry ProcureFinder-unsigned.ipa Payload)
+            echo "Created unsigned IPA at build/ProcureFinder-unsigned.ipa"
           fi
     artifacts:
       - build/ipa/*.ipa
       - build/ProcureFinder-unsigned.ipa
       - build/Derived/Build/Products/Release-iphoneos/ProcureFinder.app
       - build/ProcureFinder.xcarchive
-      - xcodebuild.log
+      - **/*.log
 
 
