@@ -34,7 +34,7 @@ workflows:
           sed -E -i '' 's/objectVersion = [0-9]+;/objectVersion = 60;/' "$PBX"
           # compatibilityVersion "Xcode 16.0" -> "Xcode 15.0"
           sed -E -i '' 's/compatibilityVersion = "Xcode [0-9\.]+";/compatibilityVersion = "Xcode 15.0";/' "$PBX"
-          # LastUpgradeCheck 1600 -> 1540 (nur kosmetisch, hilft Xcode 15 sich „zuständig“ zu fühlen)
+          # LastUpgradeCheck angleichen (kosmetisch)
           sed -E -i '' 's/LastUpgradeCheck = [0-9]+;/LastUpgradeCheck = 1540;/' "$PBX"
           echo "---- patched header ----"
           head -n 30 "$PBX"
@@ -114,7 +114,5 @@ workflows:
       - build/Derived/Build/Products/Release-iphoneos/ProcureFinder.app
       - build/ProcureFinder.xcarchive
       - xcodebuild.log
-
-
 
 
