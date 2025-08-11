@@ -1,15 +1,16 @@
 name: ProcureFinder
+
 options:
   minimumXcodeGenVersion: 2.30.0
   deploymentTarget:
     iOS: "16.0"
+
 configs:
   Debug: debug
   Release: release
+
 settings:
   base:
-    PRODUCT_BUNDLE_IDENTIFIER: com.avanti.procurefinder
-    DEVELOPMENT_TEAM: ""
     SWIFT_VERSION: 5.9
     IPHONEOS_DEPLOYMENT_TARGET: "16.0"
     TARGETED_DEVICE_FAMILY: "1"
@@ -19,25 +20,22 @@ settings:
     CODE_SIGN_STYLE: Manual
     CODE_SIGNING_ALLOWED: NO
     CODE_SIGNING_REQUIRED: NO
+
 targets:
   ProcureFinder:
     type: application
     platform: iOS
+    bundleId: com.avanti.procurefinder
     sources:
       - path: ProcureFinder/Sources
       - path: ProcureFinder/Resources
         type: folder
     info:
       path: ProcureFinder/Info.plist
-    scheme:
-      testTargets:
-        - ProcureFinderTests
-        - ProcureFinderUITests
     settings:
       base:
         INFOPLIST_FILE: ProcureFinder/Info.plist
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        SWIFT_EMIT_LOC_STRINGS: YES
+
   ProcureFinderTests:
     type: bundle.unit-test
     platform: iOS
@@ -47,6 +45,7 @@ targets:
       base:
         INFOPLIST_FILE: ProcureFinderTests/Info.plist
         CODE_SIGNING_ALLOWED: NO
+
   ProcureFinderUITests:
     type: bundle.ui-testing
     platform: iOS
