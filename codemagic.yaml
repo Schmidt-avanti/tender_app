@@ -17,22 +17,22 @@ workflows:
           xcodebuild -version
           echo "Top-Level:"
           ls -la
-          echo "Suche project.yml (bis Tiefe 8):"
-          find . -maxdepth 8 -name "project.yml" -print || true
+          echo "Suche project.yml (rekursiv):"
+          find . -name "project.yml" -print || true
 
       - name: XcodeGen installieren (robust, mit Fallback)
         script: |
-          set -euo pipefail
+          set -e
           export PATH="$HOME/.local/bin:$PATH"
           mkdir -p "$HOME/.local/bin"
-
           if ! command -v xcodegen >/dev/null 2>&1; then
             if command -v brew >/dev/null 2>&1; then
               export HOMEBREW_NO_AUTO_UPDATE=1
-              brew list xcodegen >/dev/null 2>&1 || brew install xcodegen || brew reinstall xcodegen || true
+              if ! brew list xcodegen >/dev/null 2>&1; then
+                brew install xcodegen || brew reinstall xcodegen || true
+              fi
             fi
           fi
-
           if ! command -v xcodegen >/dev/null 2>&1; then
             echo "Fallback: Portable XcodeGen laden…"
             curl -L --fail --retry 5 --retry-delay 2 --retry-connrefused \
@@ -41,34 +41,37 @@ workflows:
             unzip -o /tmp/xcodegen.zip -d "$HOME/.local/bin"
             chmod +x "$HOME/.local/bin/xcodegen" || true
           fi
+          xcodegen --version || true
 
-          xcodegen --version
-
-      - name: .xcodeproj generieren (aus project.yml, tiefensicher)
+      - name: .xcodeproj generieren (aus project.yml, POSIX)
         script: |
-          set -euo pipefail
+          set -e
+          # Alte Projektdateien entfernen (falls woanders eingecheckt)
+          find . -name "ProcureFinder.xcodeproj" -type d -exec rm -rf {} + || true
 
-          # Alle evtl. alten Projektdateien entfernen
-          find . -maxdepth 8 -name "ProcureFinder.xcodeproj" -type d -prune -exec rm -rf {} + || true
-
-          # project.yml-Kandidaten sammeln
-          mapfile -t SPEC_CANDIDATES < <(find . -maxdepth 8 -type f -name "project.yml" -print)
-          if [ "${#SPEC_CANDIDATES[@]}" -eq 0 ]; then
+          # Liste möglicher Specs sammeln (ohne Bash-Arrays/Mapfile)
+          SPEC_LIST="$(mktemp)"
+          find . -type f -name "project.yml" -print > "$SPEC_LIST"
+          if [ ! -s "$SPEC_LIST" ]; then
             echo "FEHLER: Keine project.yml im Repo gefunden."
             exit 1
           fi
 
-          # Besten Kandidaten wählen: bevorzugt Verzeichnis mit ProcureFinder/Sources
+          # Ersten Treffer merken
+          FIRST_SPEC="$(head -n1 "$SPEC_LIST")"
           BEST_SPEC=""
-          for p in "${SPEC_CANDIDATES[@]}"; do
-            d="$(cd "$(dirname "$p")" && pwd)"
-            if [ -d "$d/ProcureFinder/Sources" ]; then
-              BEST_SPEC="$p"
+
+          # Besten Treffer bevorzugen: Ordner, der ProcureFinder/Sources enthält
+          while IFS= read -r P; do
+            D="$(cd "$(dirname "$P")" && pwd)"
+            if [ -d "$D/ProcureFinder/Sources" ]; then
+              BEST_SPEC="$P"
               break
             fi
-          done
+          done < "$SPEC_LIST"
+
           if [ -z "$BEST_SPEC" ]; then
-            BEST_SPEC="${SPEC_CANDIDATES[0]}"
+            BEST_SPEC="$FIRST_SPEC"
           fi
 
           SPEC_DIR="$(cd "$(dirname "$BEST_SPEC")" && pwd)"
@@ -82,7 +85,7 @@ workflows:
           # Erzeugte .xcodeproj ermitteln
           PROJECT_PATH="$SPEC_DIR/ProcureFinder.xcodeproj"
           if [ ! -d "$PROJECT_PATH" ]; then
-            # Fallback: erste .xcodeproj im Verzeichnis
+            # Fallback: irgendeine .xcodeproj im SPEC_DIR
             PROJECT_PATH="$(find "$SPEC_DIR" -maxdepth 2 -name "*.xcodeproj" -type d | head -n1 || true)"
           fi
 
@@ -90,7 +93,7 @@ workflows:
             echo "FEHLER: Keine .xcodeproj generiert."
             echo "Inhalt von $SPEC_DIR:"
             ls -la "$SPEC_DIR" || true
-            echo "Alle .xcodeproj in $SPEC_DIR:"
+            echo "Gefundene .xcodeproj:"
             find "$SPEC_DIR" -maxdepth 2 -name "*.xcodeproj" -print || true
             exit 1
           fi
@@ -104,7 +107,7 @@ workflows:
 
       - name: AppIcon-Contents sicherstellen (Schutz gegen actool)
         script: |
-          set -euo pipefail
+          set -e
           ICONCONTENTS="ProcureFinder/Resources/Assets.xcassets/AppIcon.appiconset/Contents.json"
           if [ ! -f "$ICONCONTENTS" ]; then
             echo "AppIcon-Contents fehlt – lege Minimaldatei an."
@@ -114,10 +117,11 @@ workflows:
 
       - name: Build .app (unsigned, für Gerät)
         script: |
-          set -euo pipefail
+          set -e
+          mkdir -p build
           if [ -z "${PROJECT_PATH:-}" ] || [ ! -d "$PROJECT_PATH" ]; then
             echo "FEHLER: PROJECT_PATH ist nicht gesetzt oder existiert nicht."
-            echo "CM_ENV dump:"
+            echo "CM_ENV dump (zur Diagnose):"
             cat "$CM_ENV" || true
             exit 66
           fi
@@ -133,11 +137,14 @@ workflows:
             | tee build/xcodebuild.log
 
           APP_OUT="$DERIVED_DIR/Build/Products/Release-iphoneos/${APP_NAME}.app"
-          test -d "$APP_OUT" || { echo "FEHLER: .app nicht gefunden unter $APP_OUT"; exit 65; }
+          if [ ! -d "$APP_OUT" ]; then
+            echo "FEHLER: .app nicht gefunden unter $APP_OUT"
+            exit 65
+          fi
 
       - name: Paketieren als unsigned .ipa (für Sideloadly)
         script: |
-          set -euo pipefail
+          set -e
           APP_OUT="$DERIVED_DIR/Build/Products/Release-iphoneos/${APP_NAME}.app"
           mkdir -p "$IPA_DIR/Payload"
           rsync -a "$APP_OUT" "$IPA_DIR/Payload/"
