@@ -13,12 +13,20 @@ workflows:
           echo "---- ProcureFinder subtree ----"
           ls -la ProcureFinder || true
 
-      - name: Install XcodeGen (latest)
+      - name: Install XcodeGen (portable, no Homebrew)
         script: |
-          set -e
-          brew update
-          brew install xcodegen || brew upgrade xcodegen || true
-          xcodegen --version
+          set -euo pipefail
+          XG_VER="2.41.0"
+          TOOLS="$CM_BUILD_DIR/tools"
+          mkdir -p "$TOOLS"
+          echo "Downloading XcodeGen $XG_VER ..."
+          curl -L -o "$TOOLS/xg.zip" "https://github.com/yonaskolb/XcodeGen/releases/download/${XG_VER}/xcodegen-${XG_VER}.zip"
+          ditto -x -k "$TOOLS/xg.zip" "$TOOLS"
+          mv "$TOOLS/xcodegen" "$TOOLS/xcodegen_bin"
+          chmod +x "$TOOLS/xcodegen_bin"
+          "$TOOLS/xcodegen_bin" --version
+          # make available to following steps
+          echo "export XCODEGEN=$TOOLS/xcodegen_bin" >> "$CM_ENV"
 
       - name: Clean previous DerivedData & project
         script: |
@@ -29,9 +37,9 @@ workflows:
       - name: Generate Xcode project from project.yml
         script: |
           set -euo pipefail
-          test -f project.yml
-          xcodegen generate
-          test -d ProcureFinder.xcodeproj
+          test -f project.yml || { echo "project.yml missing in repo root"; exit 1; }
+          ${XCODEGEN} generate
+          test -d ProcureFinder.xcodeproj || { echo "Failed to generate ProcureFinder.xcodeproj"; exit 1; }
 
       - name: Downgrade PBX project format for Xcode 15.4
         script: |
