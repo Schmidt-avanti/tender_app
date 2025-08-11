@@ -13,9 +13,10 @@ targets:
     sources:
       - path: ProcureFinder/Sources
       - path: ProcureFinder/Resources
+        excludes:
+          - LaunchScreen.storyboard
         includes:
           - Assets.xcassets
-          - LaunchScreen.storyboard
           - cpv.json
     settings:
       base:
