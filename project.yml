@@ -3,7 +3,6 @@ name: ProcureFinder
 options:
   deploymentTarget:
     iOS: "16.0"
-  # XcodeGen erzeugt default Schemes; wir definieren trotzdem eines explizit
   createIntermediateGroups: true
 
 settings:
@@ -55,3 +54,4 @@ targets:
       - ProcureFinderUITests
     dependencies:
       - target: ProcureFinder
+
