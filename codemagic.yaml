@@ -17,8 +17,8 @@ workflows:
           xcodebuild -version
           echo "Top-Level:"
           ls -la
-          echo "Suche project.yml:"
-          find . -maxdepth 3 -name "project.yml" -print
+          echo "Suche project.yml (bis Tiefe 8):"
+          find . -maxdepth 8 -name "project.yml" -print || true
 
       - name: XcodeGen installieren (robust, mit Fallback)
         script: |
@@ -44,31 +44,63 @@ workflows:
 
           xcodegen --version
 
-      - name: .xcodeproj generieren (aus project.yml)
+      - name: .xcodeproj generieren (aus project.yml, tiefensicher)
         script: |
           set -euo pipefail
-          rm -rf ProcureFinder.xcodeproj || true
 
-          SPEC_PATH="$(find "$CM_BUILD_DIR" -maxdepth 3 -name "project.yml" -print | head -n1 || true)"
-          if [ -z "${SPEC_PATH:-}" ]; then
-            echo "FEHLER: project.yml nicht gefunden. Bitte ins Repo legen."
+          # Alle evtl. alten Projektdateien entfernen
+          find . -maxdepth 8 -name "ProcureFinder.xcodeproj" -type d -prune -exec rm -rf {} + || true
+
+          # project.yml-Kandidaten sammeln
+          mapfile -t SPEC_CANDIDATES < <(find . -maxdepth 8 -type f -name "project.yml" -print)
+          if [ "${#SPEC_CANDIDATES[@]}" -eq 0 ]; then
+            echo "FEHLER: Keine project.yml im Repo gefunden."
             exit 1
           fi
-          SPEC_DIR="$(cd "$(dirname "$SPEC_PATH")" && pwd)"
-          echo "Gefundene project.yml: $SPEC_PATH"
+
+          # Besten Kandidaten wählen: bevorzugt Verzeichnis mit ProcureFinder/Sources
+          BEST_SPEC=""
+          for p in "${SPEC_CANDIDATES[@]}"; do
+            d="$(cd "$(dirname "$p")" && pwd)"
+            if [ -d "$d/ProcureFinder/Sources" ]; then
+              BEST_SPEC="$p"
+              break
+            fi
+          done
+          if [ -z "$BEST_SPEC" ]; then
+            BEST_SPEC="${SPEC_CANDIDATES[0]}"
+          fi
+
+          SPEC_DIR="$(cd "$(dirname "$BEST_SPEC")" && pwd)"
+          echo "Gefundene project.yml: $BEST_SPEC"
+          echo "Arbeitsordner: $SPEC_DIR"
           cd "$SPEC_DIR"
 
-          xcodegen generate --spec "$SPEC_PATH"
+          # Projekt generieren
+          xcodegen generate --spec "$BEST_SPEC"
 
+          # Erzeugte .xcodeproj ermitteln
           PROJECT_PATH="$SPEC_DIR/ProcureFinder.xcodeproj"
           if [ ! -d "$PROJECT_PATH" ]; then
-            echo "FEHLER: XcodeGen hat $PROJECT_PATH nicht erstellt."
+            # Fallback: erste .xcodeproj im Verzeichnis
+            PROJECT_PATH="$(find "$SPEC_DIR" -maxdepth 2 -name "*.xcodeproj" -type d | head -n1 || true)"
+          fi
+
+          if [ -z "${PROJECT_PATH:-}" ] || [ ! -d "$PROJECT_PATH" ]; then
+            echo "FEHLER: Keine .xcodeproj generiert."
+            echo "Inhalt von $SPEC_DIR:"
+            ls -la "$SPEC_DIR" || true
+            echo "Alle .xcodeproj in $SPEC_DIR:"
             find "$SPEC_DIR" -maxdepth 2 -name "*.xcodeproj" -print || true
             exit 1
           fi
 
-          echo "export PROJECT_PATH=\"$PROJECT_PATH\"" >> "$CM_ENV"
           echo "PROJECT_PATH=$PROJECT_PATH"
+          # Für Folgeschritte persistieren
+          echo "export PROJECT_PATH=\"$PROJECT_PATH\"" >> "$CM_ENV"
+
+          echo "Verfügbare Schemes:"
+          xcodebuild -list -project "$PROJECT_PATH" || true
 
       - name: AppIcon-Contents sicherstellen (Schutz gegen actool)
         script: |
@@ -85,6 +117,8 @@ workflows:
           set -euo pipefail
           if [ -z "${PROJECT_PATH:-}" ] || [ ! -d "$PROJECT_PATH" ]; then
             echo "FEHLER: PROJECT_PATH ist nicht gesetzt oder existiert nicht."
+            echo "CM_ENV dump:"
+            cat "$CM_ENV" || true
             exit 66
           fi
 
