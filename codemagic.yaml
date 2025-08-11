@@ -1,50 +1,110 @@
+    workflows:
+  ios_unsigned_ipa:
+    name: "iOS Release (unsigned IPA for Sideloadly)"
+    max_build_duration: 60
+
+    environment:
+      xcode: 16.4
+      vars:
+        # Falls dein Projekt/Schema anders heißen, HIER anpassen:
+        PROJECT: "ProcureFinder.xcodeproj"
+        SCHEME: "ProcureFinder"
+        CONFIGURATION: "Release"
+        # Fallback-Bundle-ID für den Fall, dass sie im gebauten .app fehlt:
+        BUNDLE_ID: "com.avanti.procurefinder"
+
     scripts:
+      - name: "Repo-Info & Xcode-Version"
+        script: |
+          set -euxo pipefail
+          echo "PWD=$(pwd)"
+          ls -la
+          xcodebuild -version
+
+      - name: "Ensure .xcodeproj vorhanden (XcodeGen nur wenn nötig)"
+        script: |
+          set -euxo pipefail
+          if [ -d "$PROJECT" ]; then
+            echo "$PROJECT existiert – XcodeGen wird übersprungen."
+            exit 0
+          fi
+
+          if [ -f "project.yml" ] || [ -f "project.yaml" ]; then
+            echo "Erzeuge .xcodeproj aus project.yml"
+            if command -v xcodegen >/dev/null 2>&1; then
+              xcodegen
+            else
+              # Homebrew ist auf Codemagic vorhanden – Installation ist schnell.
+              brew update || true
+              brew install xcodegen || true
+              xcodegen
+            fi
+          else
+            echo "FEHLER: $PROJECT fehlt und keine project.yml gefunden."
+            exit 66
+          fi
+
       - name: "Build .app (unsigned, device)"
         script: |
           set -euxo pipefail
           DERIVED="$CM_BUILD_DIR/Derived"
+
           xcodebuild \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
-            -configuration Release \
+            -configuration "$CONFIGURATION" \
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGNING_IDENTITY= \
             -derivedDataPath "$DERIVED" \
             build
 
-          APP_DIR="$DERIVED/Build/Products/Release-iphoneos/${SCHEME}.app"
-          test -d "$APP_DIR" || { echo "Built .app not found: $APP_DIR"; ls -la "$DERIVED/Build/Products/Release-iphoneos" || true; exit 65; }
-
-          echo "Validating Info.plist…"
-          PLIST="$APP_DIR/Info.plist"
-
-          # 1) Wenn CFBundleIdentifier fehlt/leer ist: setzen wir ihn hart, damit Sideloadly arbeiten kann
-          BID=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$PLIST" 2>/dev/null || true)
-          if [ -z "${BID:-}" ] || [[ "$BID" == *'$('* ]] || [[ "$BID" == *PRODUCT_BUNDLE_IDENTIFIER* ]]; then
-            echo "Fixing CFBundleIdentifier in built app Info.plist…"
-            /usr/libexec/PlistBuddy -c "Delete :CFBundleIdentifier" "$PLIST" 2>/dev/null || true
-            /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.avanti.procurefinder" "$PLIST"
+          APP_DIR="$DERIVED/Build/Products/${CONFIGURATION}-iphoneos/${SCHEME}.app"
+          if [ ! -d "$APP_DIR" ]; then
+            echo "Built .app nicht gefunden: $APP_DIR"
+            ls -la "$DERIVED/Build/Products/${CONFIGURATION}-iphoneos" || true
+            exit 65
           fi
 
-          echo "CFBundleIdentifier now =" \
-            "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$PLIST")"
+          echo "Validiere/fiXe CFBundleIdentifier (für Sideloadly Pflicht)…"
+          PLIST="$APP_DIR/Info.plist"
+          BID=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$PLIST" 2>/dev/null || true)
 
-      - name: "Package unsigned IPA (for Sideloadly)"
+          if [ -z "${BID:-}" ]; then
+            echo "Kein CFBundleIdentifier vorhanden – setze auf $BUNDLE_ID"
+            # Versuche zuerst Add, falls Key fehlt, sonst Set
+            (/usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string $BUNDLE_ID" "$PLIST" && true) \
+              || /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$PLIST"
+          fi
+
+          echo "CFBundleIdentifier jetzt: $(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$PLIST")"
+
+      - name: "Package unsigned IPA (für Sideloadly)"
         script: |
           set -euxo pipefail
           DERIVED="$CM_BUILD_DIR/Derived"
-          APP_DIR="$DERIVED/Build/Products/Release-iphoneos/${SCHEME}.app"
+          APP_DIR="$DERIVED/Build/Products/${CONFIGURATION}-iphoneos/${SCHEME}.app"
 
-          rm -rf Payload ProcureFinder-unsigned.ipa ProcureFinder.app.zip
+          rm -rf Payload ProcureFinder-unsigned.ipa
           mkdir -p Payload
-          rsync -a --delete "$APP_DIR" "Payload/"
+          cp -R "$APP_DIR" Payload/
 
-          # Doppelt hält besser: validate vor dem Zip
-          /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "Payload/${SCHEME}.app/Info.plist" >/dev/null
+          /usr/bin/zip -qry "ProcureFinder-unsigned.ipa" Payload
+          echo "IPA erstellt: $(pwd)/ProcureFinder-unsigned.ipa"
 
-          (cd Payload && zip -qry "../ProcureFinder-unsigned.ipa" .)
-          zip -qry "ProcureFinder.app.zip" "Payload/${SCHEME}.app"
+    artifacts:
+      - ProcureFinder-unsigned.ipa
+      - Derived/Build/Products/**/*
+
+    # Optional – kannst du anpassen oder entfernen, wenn du keine E-Mails willst
+    publishing:
+      email:
+        recipients:
+          - "aa.schmidt@ja-dialog.de"
+        notify:
+          success: true
+          failure: true
+
 
 
 
