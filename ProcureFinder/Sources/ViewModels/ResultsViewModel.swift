@@ -1,27 +1,61 @@
 import Foundation
 import OSLog
 
-@MainActor
 final class ResultsViewModel: ObservableObject {
-    @Published var notices: [Notice] = []
-    @Published var loading = false
-    @Published var error: String? = nil
 
-    private let repo = NoticeRepository()
+    // MARK: - Inputs & State
+    @Published var items: [Notice] = []
+    @Published var isLoading: Bool = false
+    @Published var errorMessage: String?
 
-    func run(filters: SearchFilters, reset: Bool = true) async {
-        loading = true; error = nil
-        do {
-            let new = try await repo.search(filters: filters, reset: reset)
-            if reset { notices = new } else { notices.append(contentsOf: new) }
-        } catch {
-            self.error = error.localizedDescription
-        }
-        loading = false
+    var filters: SearchFilters
+    private let repo: NoticeRepository
+    private let log = Logger(subsystem: "ProcureFinder", category: "ResultsVM")
+
+    // MARK: - Init
+    init(filters: SearchFilters,
+         repo: NoticeRepository = NoticeRepository()) {
+        self.filters = filters
+        self.repo = repo
     }
 
-    func loadMoreIfNeeded(current: Notice) async {
-        guard let last = notices.last, last.id == current.id else { return }
-        await run(filters: SearchFilters(), reset: false)
+    // MARK: - Loading
+    /// Lädt Daten (bei `reset: true` wird die Liste ersetzt & Pagination zurückgesetzt)
+    @MainActor
+    func load(reset: Bool = false) async {
+        guard !isLoading else { return }
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+
+        do {
+            let new = try await repo.search(query: filters.text,
+                                            filters: filters,
+                                            reset: reset)
+            if reset {
+                items = new
+            } else {
+                items.append(contentsOf: new)
+            }
+        } catch {
+            log.error("Load failed: \(error.localizedDescription, privacy: .public)")
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Pull-to-Refresh
+    @MainActor
+    func refresh() async {
+        await load(reset: true)
+    }
+
+    /// Nächste Seite für Endless-Scroll laden
+    @MainActor
+    func loadMoreIfNeeded(current item: Notice?) async {
+        guard let item = item else { return }
+        let thresholdIndex = items.index(items.endIndex, offsetBy: -5, limitedBy: items.startIndex) ?? items.startIndex
+        if items.firstIndex(of: item) == thresholdIndex {
+            await load(reset: false)
+        }
     }
 }
