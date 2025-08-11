@@ -1,4 +1,5 @@
-    workflows:
+---
+workflows:
   ios_unsigned_ipa:
     name: "iOS Release (unsigned IPA for Sideloadly)"
     max_build_duration: 60
@@ -6,12 +7,10 @@
     environment:
       xcode: 16.4
       vars:
-        # Falls dein Projekt/Schema anders heißen, HIER anpassen:
-        PROJECT: "ProcureFinder.xcodeproj"
-        SCHEME: "ProcureFinder"
+        PROJECT: "ProcureFinder.xcodeproj"    # ggf. anpassen
+        SCHEME: "ProcureFinder"               # ggf. anpassen
         CONFIGURATION: "Release"
-        # Fallback-Bundle-ID für den Fall, dass sie im gebauten .app fehlt:
-        BUNDLE_ID: "com.avanti.procurefinder"
+        BUNDLE_ID: "com.avanti.procurefinder" # Fallback, falls im .app fehlend
 
     scripts:
       - name: "Repo-Info & Xcode-Version"
@@ -28,13 +27,11 @@
             echo "$PROJECT existiert – XcodeGen wird übersprungen."
             exit 0
           fi
-
           if [ -f "project.yml" ] || [ -f "project.yaml" ]; then
             echo "Erzeuge .xcodeproj aus project.yml"
             if command -v xcodegen >/dev/null 2>&1; then
               xcodegen
             else
-              # Homebrew ist auf Codemagic vorhanden – Installation ist schnell.
               brew update || true
               brew install xcodegen || true
               xcodegen
@@ -66,18 +63,15 @@
             exit 65
           fi
 
-          echo "Validiere/fiXe CFBundleIdentifier (für Sideloadly Pflicht)…"
+          echo "Validiere/fiXe CFBundleIdentifier…"
           PLIST="$APP_DIR/Info.plist"
           BID=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$PLIST" 2>/dev/null || true)
-
           if [ -z "${BID:-}" ]; then
             echo "Kein CFBundleIdentifier vorhanden – setze auf $BUNDLE_ID"
-            # Versuche zuerst Add, falls Key fehlt, sonst Set
             (/usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string $BUNDLE_ID" "$PLIST" && true) \
               || /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$PLIST"
           fi
-
-          echo "CFBundleIdentifier jetzt: $(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$PLIST")"
+          echo "CFBundleIdentifier: $(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$PLIST")"
 
       - name: "Package unsigned IPA (für Sideloadly)"
         script: |
@@ -88,7 +82,6 @@
           rm -rf Payload ProcureFinder-unsigned.ipa
           mkdir -p Payload
           cp -R "$APP_DIR" Payload/
-
           /usr/bin/zip -qry "ProcureFinder-unsigned.ipa" Payload
           echo "IPA erstellt: $(pwd)/ProcureFinder-unsigned.ipa"
 
@@ -96,14 +89,6 @@
       - ProcureFinder-unsigned.ipa
       - Derived/Build/Products/**/*
 
-    # Optional – kannst du anpassen oder entfernen, wenn du keine E-Mails willst
-    publishing:
-      email:
-        recipients:
-          - "aa.schmidt@ja-dialog.de"
-        notify:
-          success: true
-          failure: true
 
 
 
