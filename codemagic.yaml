@@ -1,173 +1,97 @@
 workflows:
-  ios_release:
-    name: iOS Release (unsigned IPA for Sideloadly)
+  ios_release_unsigned:
+    name: iOS Release (unsigned IPA für Sideloadly)
     max_build_duration: 60
     instance_type: mac_mini_m2
+
     environment:
-      xcode: 16.4
+      xcode: 16.4   # passt zum Xcode-16-Projektformat
       vars:
-        APP_NAME: "ProcureFinder"
-        DERIVED_DIR: "build/Derived"
-        IPA_DIR: "build/ipa"
+        SCHEME: "ProcureFinder"
+        PROJECT: "ProcureFinder.xcodeproj"
+
     scripts:
-      - name: Preflight (Baum & Umgebung)
+      - name: Repo-Übersicht (Debug)
         script: |
-          set -e
-          echo "PWD: $(pwd)"
-          xcodebuild -version
-          echo "Top-Level:"
+          set -euxo pipefail
+          pwd
+          git rev-parse --short HEAD || true
           ls -la
-          echo "Suche project.yml (rekursiv):"
-          find . -name "project.yml" -print || true
+          echo "---- top-level ----"
+          find . -maxdepth 2 -type f -name "*.xcodeproj" -o -name "project.yml" -print || true
 
-      - name: XcodeGen installieren (robust, mit Fallback)
+      - name: Falls nötig: XcodeGen und .xcodeproj erzeugen
         script: |
-          set -e
-          export PATH="$HOME/.local/bin:$PATH"
-          mkdir -p "$HOME/.local/bin"
-          if ! command -v xcodegen >/dev/null 2>&1; then
-            if command -v brew >/dev/null 2>&1; then
-              export HOMEBREW_NO_AUTO_UPDATE=1
-              if ! brew list xcodegen >/dev/null 2>&1; then
-                brew install xcodegen || brew reinstall xcodegen || true
-              fi
-            fi
-          fi
-          if ! command -v xcodegen >/dev/null 2>&1; then
-            echo "Fallback: Portable XcodeGen laden…"
-            curl -L --fail --retry 5 --retry-delay 2 --retry-connrefused \
-              "https://github.com/yonaskolb/XcodeGen/releases/latest/download/xcodegen.zip" \
-              -o /tmp/xcodegen.zip
-            unzip -o /tmp/xcodegen.zip -d "$HOME/.local/bin"
-            chmod +x "$HOME/.local/bin/xcodegen" || true
-          fi
-          xcodegen --version || true
-
-      - name: .xcodeproj generieren (aus project.yml, POSIX)
-        script: |
-          set -e
-          # Alte Projektdateien entfernen (falls an falscher Stelle)
-          find . -name "ProcureFinder.xcodeproj" -type d -exec rm -rf {} + || true
-
-          # project.yml-Kandidaten einsammeln
-          SPEC_LIST="$(mktemp)"
-          find . -type f -name "project.yml" -print > "$SPEC_LIST"
-          if [ ! -s "$SPEC_LIST" ]; then
-            echo "FEHLER: Keine project.yml im Repo gefunden."
-            exit 1
-          fi
-
-          FIRST_SPEC="$(head -n1 "$SPEC_LIST")"
-          BEST_SPEC=""
-          # Bevorzugt den Ordner, der ProcureFinder/Sources enthält
-          while IFS= read -r P; do
-            D="$(cd "$(dirname "$P")" && pwd)"
-            if [ -d "$D/ProcureFinder/Sources" ]; then
-              BEST_SPEC="$P"
-              break
-            fi
-          done < "$SPEC_LIST"
-          if [ -z "$BEST_SPEC" ]; then
-            BEST_SPEC="$FIRST_SPEC"
-          fi
-
-          SPEC_DIR="$(cd "$(dirname "$BEST_SPEC")" && pwd)"
-          echo "Gefundene project.yml: $BEST_SPEC"
-          echo "Arbeitsordner: $SPEC_DIR"
-          cd "$SPEC_DIR"
-
-          # Projekt generieren
-          xcodegen generate --spec "$BEST_SPEC"
-
-          # .xcodeproj repo-weit suchen (ohne -maxdepth, damit BSD find kompatibel bleibt)
-          PROJECT_PATH="$(find "$SPEC_DIR" -name "*.xcodeproj" -type d -print | head -n1 || true)"
-          if [ -z "${PROJECT_PATH:-}" ] || [ ! -d "$PROJECT_PATH" ]; then
-            # Fallback: im ganzen Repo suchen
-            PROJECT_PATH="$(cd "$CM_BUILD_DIR" && find . -name "*.xcodeproj" -type d -print | head -n1 || true)"
-            [ -n "$PROJECT_PATH" ] && PROJECT_PATH="$(cd "$CM_BUILD_DIR" && cd "$(dirname "$PROJECT_PATH")" && pwd)/$(basename "$PROJECT_PATH")"
-          fi
-
-          if [ -z "${PROJECT_PATH:-}" ] || [ ! -d "$PROJECT_PATH" ]; then
-            echo "FEHLER: Keine .xcodeproj generiert."
-            echo "Inhalt von $SPEC_DIR:"
-            ls -la "$SPEC_DIR" || true
-            echo "Repo-weit gefundene .xcodeproj:"
-            (cd "$CM_BUILD_DIR" && find . -name "*.xcodeproj" -print) || true
-            exit 1
-          fi
-
-          echo "PROJECT_PATH=$PROJECT_PATH"
-          echo "export PROJECT_PATH=\"$PROJECT_PATH\"" >> "$CM_ENV"
-
-          echo "Verfügbare Schemes:"
-          xcodebuild -list -project "$PROJECT_PATH" || true
-
-      - name: AppIcon-Contents sicherstellen (Schutz gegen actool)
-        script: |
-          set -e
-          ICONCONTENTS="ProcureFinder/Resources/Assets.xcassets/AppIcon.appiconset/Contents.json"
-          if [ ! -f "$ICONCONTENTS" ]; then
-            echo "AppIcon-Contents fehlt – lege Minimaldatei an."
-            mkdir -p "$(dirname "$ICONCONTENTS")"
-            printf '%s\n' '{ "images": [], "info": { "version": 1, "author": "xcode" } }' > "$ICONCONTENTS"
-          fi
-
-      - name: Build .app (unsigned, für Gerät) — mit Fallback-Suche
-        script: |
-          set -e
-          mkdir -p build
-
-          # Fallback: Falls PROJECT_PATH nicht existiert, repo-weit neu suchen
-          if [ -z "${PROJECT_PATH:-}" ] || [ ! -d "$PROJECT_PATH" ]; then
-            echo "Warnung: PROJECT_PATH leer oder nicht existent. Fallback-Suche…"
-            P="$(find "$CM_BUILD_DIR" -name "*.xcodeproj" -type d -print | head -n1 || true)"
-            if [ -n "$P" ]; then
-              PROJECT_PATH="$P"
-              echo "Neuer PROJECT_PATH: $PROJECT_PATH"
+          set -euxo pipefail
+          if [ -d "$PROJECT" ]; then
+            echo "✅ $PROJECT gefunden"
+          else
+            if [ -f "project.yml" ] || [ -f "ProcureFinder/project.yml" ] || [ -f "Project.yml" ]; then
+              echo "ℹ️  $PROJECT fehlt, generiere mit XcodeGen…"
+              brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+              xcodegen generate
+              test -d "$PROJECT" || { echo "❌ Konnte $PROJECT nicht erzeugen"; exit 66; }
+            else
+              echo "❌ Weder $PROJECT noch project.yml vorhanden"; exit 66
             fi
           fi
 
-          if [ -z "${PROJECT_PATH:-}" ] || [ ! -d "$PROJECT_PATH" ]; then
-            echo "FEHLER: PROJECT_PATH ist nicht gesetzt oder existiert nicht."
-            echo "CM_ENV dump:"
-            cat "$CM_ENV" || true
-            echo "Repo-weit gefundene .xcodeproj:"
-            find "$CM_BUILD_DIR" -name "*.xcodeproj" -type d -print || true
-            exit 66
-          fi
-
-          echo "Baue mit PROJECT_PATH=$PROJECT_PATH"
-          xcodebuild build \
-            -project "$PROJECT_PATH" \
-            -scheme "$APP_NAME" \
+      - name: Build .app (unsigned, Device)
+        script: |
+          set -euxo pipefail
+          DERIVED="$CM_BUILD_DIR/Derived"
+          xcodebuild \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
             -configuration Release \
             -sdk iphoneos \
-            -destination "generic/platform=iOS" \
+            -destination 'generic/platform=iOS' \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGNING_IDENTITY= \
-            -derivedDataPath "$DERIVED_DIR" \
-            | tee build/xcodebuild.log
+            -derivedDataPath "$DERIVED" \
+            build
 
-          APP_OUT="$DERIVED_DIR/Build/Products/Release-iphoneos/${APP_NAME}.app"
-          if [ ! -d "$APP_OUT" ]; then
-            echo "FEHLER: .app nicht gefunden unter $APP_OUT"
-            echo "Produktordnerinhalt:"
-            ls -la "$DERIVED_DIR/Build/Products/Release-iphoneos" || true
-            exit 65
-          fi
+          APP_DIR="$DERIVED/Build/Products/Release-iphoneos/${SCHEME}.app"
+          test -d "$APP_DIR" || { echo "❌ Built .app nicht gefunden: $APP_DIR"; ls -la "$DERIVED/Build/Products/Release-iphoneos" || true; exit 65; }
 
-      - name: Paketieren als unsigned .ipa (für Sideloadly)
+          echo "Info.plist prüfen…"
+          /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP_DIR/Info.plist" || { echo "❌ CFBundleIdentifier fehlt"; exit 67; }
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP_DIR/Info.plist")
+          case "${BUNDLE_ID:-}" in
+            ""|\$\(*|\$\{*|*PRODUCT_BUNDLE_IDENTIFIER*)
+              echo "❌ CFBundleIdentifier ist leer/unerledigt: '$BUNDLE_ID'"; exit 67;;
+            *)
+              echo "✅ CFBundleIdentifier: $BUNDLE_ID";;
+          esac
+
+      - name: Unsigned IPA für Sideloadly paketieren
         script: |
-          set -e
-          APP_OUT="$DERIVED_DIR/Build/Products/Release-iphoneos/${APP_NAME}.app"
-          mkdir -p "$IPA_DIR/Payload"
-          rsync -a "$APP_OUT" "$IPA_DIR/Payload/"
-          (cd "$IPA_DIR" && zip -qry "${APP_NAME}-unsigned.ipa" Payload)
-          echo "FERTIG: $IPA_DIR/${APP_NAME}-unsigned.ipa"
+          set -euxo pipefail
+          DERIVED="$CM_BUILD_DIR/Derived"
+          APP_DIR="$DERIVED/Build/Products/Release-iphoneos/${SCHEME}.app"
+
+          rm -rf Payload ProcureFinder-unsigned.ipa ProcureFinder.app.zip
+          mkdir -p Payload
+          # exaktes gebautes .app übernehmen
+          rsync -a --delete "$APP_DIR" "Payload/"
+
+          # Sicherheitscheck: Info.plist in der Payload
+          /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "Payload/${SCHEME}.app/Info.plist" >/dev/null
+
+          # Artefakte erstellen
+          (cd Payload && zip -qry "../ProcureFinder-unsigned.ipa" .)
+          zip -qry "ProcureFinder.app.zip" "Payload/${SCHEME}.app"
+
+      - name: Artefakte ablegen
+        script: |
+          set -euxo pipefail
+          mkdir -p "$CM_ARTIFACTS"
+          mv ProcureFinder-unsigned.ipa "$CM_ARTIFACTS/"
+          mv ProcureFinder.app.zip "$CM_ARTIFACTS/"
 
     artifacts:
-      - build/ipa/*.ipa
-      - build/Derived/Build/Products/Release-iphoneos/*.app
-      - build/xcodebuild.log
+      - ProcureFinder-unsigned.ipa
+      - ProcureFinder.app.zip
+
 
 
 
