@@ -46,10 +46,10 @@ workflows:
       - name: .xcodeproj generieren (aus project.yml, POSIX)
         script: |
           set -e
-          # Alte Projektdateien entfernen (falls woanders eingecheckt)
+          # Alte Projektdateien entfernen (falls an falscher Stelle)
           find . -name "ProcureFinder.xcodeproj" -type d -exec rm -rf {} + || true
 
-          # Liste möglicher Specs sammeln (ohne Bash-Arrays/Mapfile)
+          # project.yml-Kandidaten einsammeln
           SPEC_LIST="$(mktemp)"
           find . -type f -name "project.yml" -print > "$SPEC_LIST"
           if [ ! -s "$SPEC_LIST" ]; then
@@ -57,11 +57,9 @@ workflows:
             exit 1
           fi
 
-          # Ersten Treffer merken
           FIRST_SPEC="$(head -n1 "$SPEC_LIST")"
           BEST_SPEC=""
-
-          # Besten Treffer bevorzugen: Ordner, der ProcureFinder/Sources enthält
+          # Bevorzugt den Ordner, der ProcureFinder/Sources enthält
           while IFS= read -r P; do
             D="$(cd "$(dirname "$P")" && pwd)"
             if [ -d "$D/ProcureFinder/Sources" ]; then
@@ -69,7 +67,6 @@ workflows:
               break
             fi
           done < "$SPEC_LIST"
-
           if [ -z "$BEST_SPEC" ]; then
             BEST_SPEC="$FIRST_SPEC"
           fi
@@ -82,24 +79,24 @@ workflows:
           # Projekt generieren
           xcodegen generate --spec "$BEST_SPEC"
 
-          # Erzeugte .xcodeproj ermitteln
-          PROJECT_PATH="$SPEC_DIR/ProcureFinder.xcodeproj"
-          if [ ! -d "$PROJECT_PATH" ]; then
-            # Fallback: irgendeine .xcodeproj im SPEC_DIR
-            PROJECT_PATH="$(find "$SPEC_DIR" -maxdepth 2 -name "*.xcodeproj" -type d | head -n1 || true)"
+          # .xcodeproj repo-weit suchen (ohne -maxdepth, damit BSD find kompatibel bleibt)
+          PROJECT_PATH="$(find "$SPEC_DIR" -name "*.xcodeproj" -type d -print | head -n1 || true)"
+          if [ -z "${PROJECT_PATH:-}" ] || [ ! -d "$PROJECT_PATH" ]; then
+            # Fallback: im ganzen Repo suchen
+            PROJECT_PATH="$(cd "$CM_BUILD_DIR" && find . -name "*.xcodeproj" -type d -print | head -n1 || true)"
+            [ -n "$PROJECT_PATH" ] && PROJECT_PATH="$(cd "$CM_BUILD_DIR" && cd "$(dirname "$PROJECT_PATH")" && pwd)/$(basename "$PROJECT_PATH")"
           fi
 
           if [ -z "${PROJECT_PATH:-}" ] || [ ! -d "$PROJECT_PATH" ]; then
             echo "FEHLER: Keine .xcodeproj generiert."
             echo "Inhalt von $SPEC_DIR:"
             ls -la "$SPEC_DIR" || true
-            echo "Gefundene .xcodeproj:"
-            find "$SPEC_DIR" -maxdepth 2 -name "*.xcodeproj" -print || true
+            echo "Repo-weit gefundene .xcodeproj:"
+            (cd "$CM_BUILD_DIR" && find . -name "*.xcodeproj" -print) || true
             exit 1
           fi
 
           echo "PROJECT_PATH=$PROJECT_PATH"
-          # Für Folgeschritte persistieren
           echo "export PROJECT_PATH=\"$PROJECT_PATH\"" >> "$CM_ENV"
 
           echo "Verfügbare Schemes:"
@@ -115,17 +112,31 @@ workflows:
             printf '%s\n' '{ "images": [], "info": { "version": 1, "author": "xcode" } }' > "$ICONCONTENTS"
           fi
 
-      - name: Build .app (unsigned, für Gerät)
+      - name: Build .app (unsigned, für Gerät) — mit Fallback-Suche
         script: |
           set -e
           mkdir -p build
+
+          # Fallback: Falls PROJECT_PATH nicht existiert, repo-weit neu suchen
+          if [ -z "${PROJECT_PATH:-}" ] || [ ! -d "$PROJECT_PATH" ]; then
+            echo "Warnung: PROJECT_PATH leer oder nicht existent. Fallback-Suche…"
+            P="$(find "$CM_BUILD_DIR" -name "*.xcodeproj" -type d -print | head -n1 || true)"
+            if [ -n "$P" ]; then
+              PROJECT_PATH="$P"
+              echo "Neuer PROJECT_PATH: $PROJECT_PATH"
+            fi
+          fi
+
           if [ -z "${PROJECT_PATH:-}" ] || [ ! -d "$PROJECT_PATH" ]; then
             echo "FEHLER: PROJECT_PATH ist nicht gesetzt oder existiert nicht."
-            echo "CM_ENV dump (zur Diagnose):"
+            echo "CM_ENV dump:"
             cat "$CM_ENV" || true
+            echo "Repo-weit gefundene .xcodeproj:"
+            find "$CM_BUILD_DIR" -name "*.xcodeproj" -type d -print || true
             exit 66
           fi
 
+          echo "Baue mit PROJECT_PATH=$PROJECT_PATH"
           xcodebuild build \
             -project "$PROJECT_PATH" \
             -scheme "$APP_NAME" \
@@ -139,6 +150,8 @@ workflows:
           APP_OUT="$DERIVED_DIR/Build/Products/Release-iphoneos/${APP_NAME}.app"
           if [ ! -d "$APP_OUT" ]; then
             echo "FEHLER: .app nicht gefunden unter $APP_OUT"
+            echo "Produktordnerinhalt:"
+            ls -la "$DERIVED_DIR/Build/Products/Release-iphoneos" || true
             exit 65
           fi
 
@@ -155,5 +168,6 @@ workflows:
       - build/ipa/*.ipa
       - build/Derived/Build/Products/Release-iphoneos/*.app
       - build/xcodebuild.log
+
 
 
