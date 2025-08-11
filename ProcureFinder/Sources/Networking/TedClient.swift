@@ -1,37 +1,14 @@
 import Foundation
 import OSLog
 
-// MARK: - Endpunkte
-
-struct TedEndpoints {
-    /// Basis: TED Search API (anonymous POST)
-    /// Beispiel laut Doku: https://ted.europa.eu/api/v3/notices/search
-    let base = URL(string: "https://ted.europa.eu")!
-    var search: URL { base.appendingPathComponent("/api/v3/notices/search") }
-
-    /// Hilfslinks (Schema siehe README)
-    static func htmlURL(lang: String, publicationNumber: String) -> URL? {
-        URL(string: "https://ted.europa.eu/\(lang)/notice/\(publicationNumber)/html")
-    }
-    static func pdfURL(lang: String, publicationNumber: String) -> URL? {
-        URL(string: "https://ted.europa.eu/\(lang)/notice/\(publicationNumber)/pdf")
-    }
-}
-
-// MARK: - Dynamic Coding Key
+// MARK: - Response-Modelle (defensiv)
 
 private struct DynamicKey: CodingKey, Hashable {
     var stringValue: String
     var intValue: Int?
-
     init?(stringValue: String) { self.stringValue = stringValue }
-    init?(intValue: Int) {
-        self.intValue = intValue
-        self.stringValue = String(intValue)
-    }
+    init?(intValue: Int) { self.intValue = intValue; self.stringValue = String(intValue) }
 }
-
-// MARK: - Response-Modelle (defensiv)
 
 struct TedSearchResponse: Decodable {
     let total: Int
@@ -42,7 +19,6 @@ struct TedSearchResponse: Decodable {
         self.items = items
     }
 
-    /// Manche Varianten liefern `items`, andere `results` oder `notices`
     private enum K: String, CodingKey { case total, totalCount, count, items, results, notices, data }
 
     init(from decoder: Decoder) throws {
@@ -52,19 +28,10 @@ struct TedSearchResponse: Decodable {
         let totalC = try c.decodeIfPresent(Int.self, forKey: .count)
         self.total = totalA ?? totalB ?? totalC ?? 0
 
-        if let arr = try c.decodeIfPresent([NoticeDTO].self, forKey: .items) {
-            self.items = arr
-            return
-        }
-        if let arr = try c.decodeIfPresent([NoticeDTO].self, forKey: .results) {
-            self.items = arr
-            return
-        }
-        if let arr = try c.decodeIfPresent([NoticeDTO].self, forKey: .notices) {
-            self.items = arr
-            return
-        }
-        // Manche kapseln die Liste unter "data"
+        if let arr = try c.decodeIfPresent([NoticeDTO].self, forKey: .items) { self.items = arr; return }
+        if let arr = try c.decodeIfPresent([NoticeDTO].self, forKey: .results) { self.items = arr; return }
+        if let arr = try c.decodeIfPresent([NoticeDTO].self, forKey: .notices) { self.items = arr; return }
+
         if let nested = try? c.nestedContainer(keyedBy: DynamicKey.self, forKey: .data),
            let key = DynamicKey(stringValue: "items"),
            let arr = try? nested.decodeIfPresent([NoticeDTO].self, forKey: key) {
@@ -99,13 +66,11 @@ struct TedSearchResponse: Decodable {
                 return nil
             }
             func decodeDouble(_ keys: [String]) -> Double? {
-                // Versuche Zahl, sonst String → Zahl
                 for k in keys {
                     if let dk = DynamicKey(stringValue: k) {
                         if let d = try? c.decodeIfPresent(Double.self, forKey: dk) { return d }
                         if let s = (try? c.decodeIfPresent(String.self, forKey: dk))?.trimmingCharacters(in: .whitespacesAndNewlines) {
                             if let d = Double(s) { return d }
-                            // Erlaube Komma-Zahlen
                             let s2 = s.replacingOccurrences(of: ",", with: ".")
                             if let d = Double(s2) { return d }
                         }
@@ -130,15 +95,15 @@ struct TedSearchResponse: Decodable {
                 return nil
             }
 
-            self.publicationNumber = decodeString(["ND", "publication-number", "ojs_number", "publicationNumber"])
-            self.title             = decodeString(["TI", "title", "title_en", "title_de", "title_fr"])
-            self.country           = decodeString(["CY", "country", "country_code"])
-            self.procedureType     = decodeString(["PT", "procedure-type", "procedureType"])
-            self.cpvTopCode        = decodeString(["CPV", "cpv", "cpv_top", "cpvTopCode"])
-            self.budget            = decodeDouble(["VAL", "BT-5381", "estimatedValue", "budget"])
-            self.datePublished     = decodeDate(["PD", "publication-date", "datePublished"])
-            self.language          = decodeString(["LG", "language", "lang"])
-            self.ojsId             = decodeString(["ID", "noticeId", "ojs_id"])
+            self.publicationNumber = decodeString(["ND","publication-number","ojs_number","publicationNumber"])
+            self.title             = decodeString(["TI","title","title_en","title_de","title_fr"])
+            self.country           = decodeString(["CY","country","country_code"])
+            self.procedureType     = decodeString(["PT","procedure-type","procedureType"])
+            self.cpvTopCode        = decodeString(["CPV","cpv","cpv_top","cpvTopCode"])
+            self.budget            = decodeDouble(["VAL","BT-5381","estimatedValue","budget"])
+            self.datePublished     = decodeDate(["PD","publication-date","datePublished"])
+            self.language          = decodeString(["LG","language","lang"])
+            self.ojsId             = decodeString(["ID","noticeId","ojs_id"])
         }
     }
 }
@@ -146,18 +111,16 @@ struct TedSearchResponse: Decodable {
 // MARK: - Domain Mapping (DTO -> Notice)
 
 extension TedSearchResponse.NoticeDTO {
-    func toNotice() -> Notice {
-        Notice(
-            id: publicationNumber ?? UUID().uuidString,
+    func toDomainNotice() -> Notice {
+        let pub = publicationNumber ?? UUID().uuidString
+        return Notice(
+            publicationNumber: pub,
             title: title ?? "—",
             country: country ?? "—",
-            procedureType: procedureType ?? "—",
-            cpvTopCode: cpvTopCode,
+            procedure: procedureType ?? "—",
+            cpvTop: cpvTopCode,
             budget: budget,
-            datePublished: datePublished,
-            language: language ?? "en",
-            publicationNumber: publicationNumber,
-            ojsId: ojsId
+            publicationDate: datePublished
         )
     }
 }
@@ -175,13 +138,10 @@ final class TedClient {
         self.session = session
     }
 
-    // MARK: Public APIs (beide Varianten bleiben stabil)
-
-    /// Rohantwort (mit DTOs)
+    // Rohantwort
     func search(filters: SearchFilters, page: Int, pageSize: Int = 20) async throws -> TedSearchResponse {
         let req = try buildRequest(filters: filters, page: page, size: pageSize)
         log.debug("POST \(req.url?.absoluteString ?? "-") page=\(page, privacy: .public) size=\(pageSize, privacy: .public)")
-
         let (data, resp) = try await session.data(for: req)
         try Self.checkHTTP(resp)
 
@@ -191,16 +151,15 @@ final class TedClient {
             let r = try dec.decode(TedSearchResponse.self, from: data)
             return r
         } catch {
-            // Fallback: falls API ein anderes Feld für die Liste nutzt, oben bereits abgefangen.
             log.error("Decoding failed: \(error.localizedDescription, privacy: .public)")
             throw error
         }
     }
 
-    /// Komfort: direkt Domain-Modelle
+    // Direkt Domain-Modelle
     func searchNotices(filters: SearchFilters, page: Int, pageSize: Int = 20) async throws -> [Notice] {
         let r = try await search(filters: filters, page: page, pageSize: pageSize)
-        return r.items.map { $0.toNotice() }
+        return r.items.map { $0.toDomainNotice() }
     }
 
     // MARK: - Request Builder
@@ -211,16 +170,16 @@ final class TedClient {
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.timeoutInterval = 30
 
-        // Body gemäß README-Beschreibung – defensiv & tolerant
         var body: [String: Any] = [
             "page": max(0, page),
             "size": max(1, size),
-            "sort": "date,desc"
+            "sort": filters.sort.rawValue // sort ist nicht-optional
         ]
 
-        if let q = (filters.text?.trimmingCharacters(in: .whitespacesAndNewlines)), !q.isEmpty {
-            body["query"] = q
-        }
+        // text ist nicht-optional
+        let q = filters.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !q.isEmpty { body["query"] = q }
+
         if !filters.countries.isEmpty {
             body["countries"] = filters.countries
         }
@@ -235,9 +194,6 @@ final class TedClient {
         }
         if let to = filters.dateTo {
             body["dateTo"] = isoDate(to)
-        }
-        if let s = filters.sort?.rawValue {
-            body["sort"] = s
         }
 
         urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
@@ -257,4 +213,3 @@ final class TedClient {
         }
     }
 }
-
