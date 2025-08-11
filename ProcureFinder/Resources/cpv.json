@@ -1,0 +1,152 @@
+[
+  {
+    "code": "03000000-1",
+    "en": "Agricultural, farming, fishing, forestry and related products",
+    "de": "Landwirtschaftliche, gartenbauliche, fischereiwirtschaftliche, forstwirtschaftliche Erzeugnisse und verwandte Produkte"
+  },
+  {
+    "code": "09000000-3",
+    "en": "Petroleum products, fuel, electricity and other sources of energy",
+    "de": "Erdölerzeugnisse, Brennstoffe, Elektrizität und andere Energiequellen"
+  },
+  {
+    "code": "15000000-8",
+    "en": "Food, beverages, tobacco and related products",
+    "de": "Nahrungsmittel, Getränke, Tabak und zugehörige Erzeugnisse"
+  },
+  {
+    "code": "18000000-9",
+    "en": "Clothing, footwear, luggage articles and accessories",
+    "de": "Bekleidung, Schuhe, Reiseartikel und Zubehör"
+  },
+  {
+    "code": "30000000-9",
+    "en": "Office and computing machinery, equipment and supplies",
+    "de": "Büro- und Datenverarbeitungsmaschinen, Ausrüstungen und Zubehör"
+  },
+  {
+    "code": "30100000-0",
+    "en": "Office machinery, equipment and supplies except computers, printers and furniture",
+    "de": "Büromaschinen, -ausrüstungen und -zubehör, außer Computern, Druckern und Möbeln"
+  },
+  {
+    "code": "30200000-1",
+    "en": "Computer equipment and supplies",
+    "de": "Computeranlagen und Zubehör"
+  },
+  {
+    "code": "32000000-3",
+    "en": "Radio, television, communication, telecommunication and related equipment",
+    "de": "Funk- und Fernsehgeräte, Kommunikations- und Telekommunikationsanlagen und Zubehör"
+  },
+  {
+    "code": "33000000-0",
+    "en": "Medical equipments, pharmaceuticals and personal care products",
+    "de": "Medizinische Ausrüstung, Arzneimittel und Pflegeprodukte"
+  },
+  {
+    "code": "34000000-7",
+    "en": "Transport equipment and auxiliary products to transportation",
+    "de": "Transportanlagen und Erzeugnisse für den Transport"
+  },
+  {
+    "code": "35000000-4",
+    "en": "Security, fire-fighting, police and defence equipment",
+    "de": "Sicherheits-, Brandbekämpfungs-, Polizei- und Verteidigungsausrüstung"
+  },
+  {
+    "code": "38000000-5",
+    "en": "Laboratory, optical and precision equipments (excl. glasses)",
+    "de": "Labor-, optische und Präzisionsapparate (ausgenommen Brillen)"
+  },
+  {
+    "code": "39000000-2",
+    "en": "Furniture (incl. office), furnishings, domestic appliances (excl. lighting) and cleaning products",
+    "de": "Möbel (einschl. Büromöbel), Einrichtung, Haushaltsgeräte (ohne Beleuchtung) und Reinigungsprodukte"
+  },
+  {
+    "code": "41000000-9",
+    "en": "Collected and purified water",
+    "de": "Gesammeltes und gereinigtes Wasser"
+  },
+  {
+    "code": "42000000-6",
+    "en": "Industrial machinery",
+    "de": "Industriemaschinen"
+  },
+  {
+    "code": "45000000-7",
+    "en": "Construction work",
+    "de": "Bauarbeiten"
+  },
+  {
+    "code": "48000000-8",
+    "en": "Software package and information systems",
+    "de": "Softwarepakete und Informationssysteme"
+  },
+  {
+    "code": "50000000-5",
+    "en": "Repair and maintenance services",
+    "de": "Reparatur- und Wartungsdienste"
+  },
+  {
+    "code": "51000000-9",
+    "en": "Installation services (except software)",
+    "de": "Installationsdienste (außer Software)"
+  },
+  {
+    "code": "60000000-8",
+    "en": "Transport services (excl. Waste transport)",
+    "de": "Transportdienste (ohne Abfalltransport)"
+  },
+  {
+    "code": "63000000-9",
+    "en": "Supporting and auxiliary transport services; travel agencies services",
+    "de": "Hilfs- und Nebentätigkeiten im Transportwesen; Leistungen von Reisebüros"
+  },
+  {
+    "code": "70000000-1",
+    "en": "Real estate services",
+    "de": "Immobiliendienste"
+  },
+  {
+    "code": "72000000-5",
+    "en": "IT services: consulting, software development, Internet and support",
+    "de": "IT-Dienste: Beratung, Software-Entwicklung, Internet und Support"
+  },
+  {
+    "code": "73000000-2",
+    "en": "Research and development services and related consultancy services",
+    "de": "Forschungs- und Entwicklungsdienste und zugehörige Beratungsdienste"
+  },
+  {
+    "code": "75000000-6",
+    "en": "Administration, defence and social security services",
+    "de": "Verwaltungs-, Verteidigungs- und Sozialversicherungsdienste"
+  },
+  {
+    "code": "79000000-4",
+    "en": "Business services: law, marketing, consulting, recruitment, printing and security",
+    "de": "Geschäftsdienste: Recht, Marketing, Beratung, Personalbeschaffung, Druck und Sicherheitsdienste"
+  },
+  {
+    "code": "80000000-4",
+    "en": "Education and training services",
+    "de": "Dienstleistungen im Bildungswesen und in der Ausbildung"
+  },
+  {
+    "code": "85000000-9",
+    "en": "Health and social work services",
+    "de": "Gesundheits- und Sozialwesen"
+  },
+  {
+    "code": "90000000-7",
+    "en": "Sewage, refuse, cleaning and environmental services",
+    "de": "Abwasser- und Abfallbeseitigung, Reinigungsdienste und Umweltschutz"
+  },
+  {
+    "code": "98000000-3",
+    "en": "Other community, social and personal services",
+    "de": "Sonstige gemeinschaftliche, soziale und persönliche Dienste"
+  }
+]

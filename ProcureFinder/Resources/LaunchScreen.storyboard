@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE storyboard PUBLIC "-//Apple//DTD DOCUMENT V1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="21701" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" useTraitCollections="YES" initialViewController="ViewController">
+    <device id="retina6_12" orientation="portrait" appearance="light"/>
+    <scenes>
+        <scene sceneID="scene">
+            <objects>
+                <viewController id="ViewController" sceneMemberID="viewController">
+                    <view key="view" contentMode="scaleToFill" id="view">
+                        <rect key="frame" x="0" y="0" width="393" height="852"/>
+                        <color key="backgroundColor" systemColor="systemBackgroundColor"/>
+                        <subviews>
+                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" text="ProcureFinder" textAlignment="center" lineBreakMode="tailTruncation" numberOfLines="1" baselineAdjustment="alignBaselines" id="label">
+                                <rect key="frame" x="0" y="0" width="393" height="852"/>
+                                <fontDescription key="fontDescription" type="boldSystem" pointSize="24"/>
+                                <color key="textColor" systemColor="labelColor"/>
+                                <nil key="highlightedColor"/>
+                            </label>
+                        </subviews>
+                    </view>
+                </viewController>
+            </objects>
+        </scene>
+    </scenes>
+</document>
