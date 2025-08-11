@@ -1,6 +1,6 @@
 workflows:
   ios_release:
-    name: iOS Release
+    name: iOS Release (Xcode 15.4, unsigned IPA for Sideloadly)
     max_build_duration: 60
     environment:
       xcode: 15.4
@@ -10,33 +10,54 @@ workflows:
           set -e
           echo "PWD: $(pwd)"
           ls -la
-          echo "----"
+          echo "---- ProcureFinder subtree ----"
           ls -la ProcureFinder || true
 
-      - name: Install XcodeGen
+      - name: Install XcodeGen (latest)
         script: |
-          brew install xcodegen || true
+          set -e
+          brew update
+          brew install xcodegen || brew upgrade xcodegen || true
           xcodegen --version
 
-      - name: Generate Xcode project from project.yml (force)
+      - name: Clean previous DerivedData & project
         script: |
-          set -e
-          test -f project.yml || { echo "project.yml missing in repo root"; exit 1; }
+          set -euxo pipefail
+          rm -rf build/Derived
           rm -rf ProcureFinder.xcodeproj
+
+      - name: Generate Xcode project from project.yml
+        script: |
+          set -euo pipefail
+          test -f project.yml
           xcodegen generate
-          test -d ProcureFinder.xcodeproj || { echo "Failed to generate ProcureFinder.xcodeproj"; exit 1; }
+          test -d ProcureFinder.xcodeproj
 
-      - name: Set build number
+      - name: Downgrade PBX project format for Xcode 15.4
         script: |
-          set -e
-          BUILD_NUM=${CM_BUILD_ID:-1}
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${BUILD_NUM}" ProcureFinder/Info.plist
+          set -euo pipefail
+          PBX="ProcureFinder.xcodeproj/project.pbxproj"
+          echo "Before patch:"
+          (grep -n 'objectVersion\|compatibilityVersion' "$PBX" || true)
+          # objectVersion 77 -> 60; compatibility "Xcode 16.0" -> "Xcode 15.0"
+          /usr/bin/sed -i '' 's/objectVersion = [0-9][0-9]*/objectVersion = 60/' "$PBX"
+          /usr/bin/sed -i '' 's/compatibilityVersion = "Xcode [0-9.]*"/compatibilityVersion = "Xcode 15.0"/' "$PBX"
+          echo "After patch:"
+          grep -n 'objectVersion\|compatibilityVersion' "$PBX" || true
 
-      - name: Generate App Icons
+      - name: Ensure minimal AppIcon (to satisfy actool)
         script: |
-          python3 ProcureFinder/Scripts/gen_app_icons.py || true
+          set -euo pipefail
+          ICONSET="ProcureFinder/Resources/Assets.xcassets/AppIcon.appiconset"
+          mkdir -p "$ICONSET"
+          CONTENTS="$ICONSET/Contents.json"
+          if [ ! -s "$CONTENTS" ]; then
+            cat > "$CONTENTS" << 'JSON'
+            { "images": [], "info": { "version": 1, "author": "xcode" } }
+            JSON
+          fi
 
-      - name: Build (unsigned by default; signed archive if vars present)
+      - name: Build (unsigned device build)
         script: |
           set -euo pipefail
           APP_NAME="ProcureFinder"
@@ -45,41 +66,41 @@ workflows:
           BUILD_DIR="$CM_BUILD_DIR/build"
           mkdir -p "$BUILD_DIR"
 
-          if [ -n "${CM_PROVISIONING_PROFILE:-}" ] || [ -n "${APP_STORE_CONNECT_PRIVATE_KEY:-}" ]; then
-            echo "Signed archive path"
-            xcodebuild -project "$PROJECT_PATH" \
-              -scheme "$SCHEME" -configuration Release -sdk iphoneos \
-              -archivePath "$BUILD_DIR/${APP_NAME}.xcarchive" clean archive
-          else
-            echo "UNSIGNED device build path"
-            xcodebuild -project "$PROJECT_PATH" \
-              -scheme "$SCHEME" -configuration Release -sdk iphoneos \
-              -destination generic/platform=iOS \
-              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGNING_IDENTITY= \
-              clean build -derivedDataPath "$BUILD_DIR/Derived"
-          fi
+          xcodebuild \
+            -project "$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGNING_IDENTITY= \
+            clean build \
+            -derivedDataPath "$BUILD_DIR/Derived" \
+            | tee "$BUILD_DIR/xcodebuild.log" | xcpretty
 
-      - name: Export / Package IPA
+      - name: Package unsigned .ipa (for Sideloadly)
         script: |
           set -euo pipefail
-          APP_NAME="ProcureFinder"
-          BUILD_DIR="$CM_BUILD_DIR/build"
-          DERIVED="$BUILD_DIR/Derived"
-          APP_PATH="$DERIVED/Build/Products/Release-iphoneos/${APP_NAME}.app"
-          ARCHIVE_PATH="$BUILD_DIR/${APP_NAME}.xcarchive"
-          OUT_DIR="$BUILD_DIR/ipa"
-          LOG_PATH="$BUILD_DIR/xcodebuild_export.log"
-
+          APP_PRODUCT="$CM_BUILD_DIR/build/Derived/Build/Products/Release-iphoneos/ProcureFinder.app"
+          OUT_DIR="$CM_BUILD_DIR/build/ipa"
+          if [ ! -d "$APP_PRODUCT" ]; then
+            echo "ERROR: .app missing at $APP_PRODUCT"
+            exit 2
+          fi
           rm -rf "$OUT_DIR"
-          mkdir -p "$OUT_DIR"
+          mkdir -p "$OUT_DIR/Payload"
+          cp -R "$APP_PRODUCT" "$OUT_DIR/Payload/ProcureFinder.app"
+          (cd "$OUT_DIR" && zip -qry "../ProcureFinder-unsigned.ipa" Payload)
+          echo "IPA packaged at build/ProcureFinder-unsigned.ipa"
 
-          if [ -d "$ARCHIVE_PATH" ]; then
-            echo "Found archive -> exporting signed IPA"
-            EXPORT_PLIST="$BUILD_DIR/exportOptions.plist"
-            /usr/libexec/PlistBuddy -c 'Clear dict' "$EXPORT_PLIST" 2>/dev/null || true
-            /usr/libexec/PlistBuddy -c 'Add :method string ad-hoc' "$EXPORT_PLIST"
-            /usr/libexec/PlistBuddy -c '
+    artifacts:
+      - build/Derived/Build/Products/Release-iphoneos/ProcureFinder.app
+      - build/ProcureFinder-unsigned.ipa
+      - build/xcodebuild.log
 
-
-
-
+    publishing:
+      email:
+        recipients:
+          - ${CM_USER_EMAIL}
+        notify:
+          success: true
+          failure: true
