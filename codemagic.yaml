@@ -1,105 +1,75 @@
 workflows:
   ios_release:
-    name: iOS Release (Xcode 15.4, unsigned IPA for Sideloadly)
+    name: iOS Release (Sideloadly)
     max_build_duration: 60
+    instance_type: mac_mini_m2
     environment:
-      xcode: 15.4
+      # Wichtig: Projektformat 77 benötigt Xcode 16.x
+      # Verfügbar auf Codemagic (16.0/16.4 sind Images). 
+      # Siehe Codemagic Xcode 16 Specs.
+      xcode: 16.4
+      vars:
+        APP_SCHEME: "ProcureFinder"
+        APP_PROJECT: "ProcureFinder.xcodeproj"
+        BUILD_CONFIGURATION: "Release"
+        DERIVED_DATA: "$CM_BUILD_DIR/build/Derived"
+
+    triggering:
+      events:
+        - push
+
     scripts:
-      - name: Show repo tree (debug)
-        script: |
-          set -e
-          echo "PWD: $(pwd)"
-          ls -la
-          echo "---- ProcureFinder subtree ----"
-          ls -la ProcureFinder || true
-
-      - name: Install XcodeGen (portable, no Homebrew)
+      - name: Xcode & Swift Version anzeigen
         script: |
           set -euo pipefail
-          XG_VER="2.41.0"
-          TOOLS="$CM_BUILD_DIR/tools"
-          mkdir -p "$TOOLS"
-          echo "Downloading XcodeGen $XG_VER ..."
-          curl -L -o "$TOOLS/xg.zip" "https://github.com/yonaskolb/XcodeGen/releases/download/${XG_VER}/xcodegen-${XG_VER}.zip"
-          ditto -x -k "$TOOLS/xg.zip" "$TOOLS"
-          mv "$TOOLS/xcodegen" "$TOOLS/xcodegen_bin"
-          chmod +x "$TOOLS/xcodegen_bin"
-          "$TOOLS/xcodegen_bin" --version
-          # make available to following steps
-          echo "export XCODEGEN=$TOOLS/xcodegen_bin" >> "$CM_ENV"
+          xcodebuild -version
+          swift --version
 
-      - name: Clean previous DerivedData & project
-        script: |
-          set -euxo pipefail
-          rm -rf build/Derived
-          rm -rf ProcureFinder.xcodeproj
-
-      - name: Generate Xcode project from project.yml
+      - name: Build-Nummer automatisch setzen (CFBundleVersion)
         script: |
           set -euo pipefail
-          test -f project.yml || { echo "project.yml missing in repo root"; exit 1; }
-          ${XCODEGEN} generate
-          test -d ProcureFinder.xcodeproj || { echo "Failed to generate ProcureFinder.xcodeproj"; exit 1; }
+          BUILD_NUMBER=$(date +%Y%m%d%H%M)
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "ProcureFinder/Info.plist"
+          echo "CFBundleVersion=$BUILD_NUMBER gesetzt"
 
-      - name: Downgrade PBX project format for Xcode 15.4
+      - name: Clean
         script: |
           set -euo pipefail
-          PBX="ProcureFinder.xcodeproj/project.pbxproj"
-          echo "Before patch:"
-          (grep -n 'objectVersion\|compatibilityVersion' "$PBX" || true)
-          /usr/bin/sed -i '' 's/objectVersion = [0-9][0-9]*/objectVersion = 60/' "$PBX"
-          /usr/bin/sed -i '' 's/compatibilityVersion = "Xcode [0-9.]*"/compatibilityVersion = "Xcode 15.0"/' "$PBX"
-          echo "After patch:"
-          grep -n 'objectVersion\|compatibilityVersion' "$PBX" || true
+          rm -rf "$DERIVED_DATA" build || true
+          mkdir -p "$DERIVED_DATA"
 
-      - name: Ensure minimal AppIcon (to satisfy actool)
+      - name: Build .app (unsigned, für Gerät)
         script: |
           set -euo pipefail
-          ICONSET="ProcureFinder/Resources/Assets.xcassets/AppIcon.appiconset"
-          mkdir -p "$ICONSET"
-          CONTENTS="$ICONSET/Contents.json"
-          if [ ! -s "$CONTENTS" ]; then
-            cat > "$CONTENTS" << 'JSON'
-            { "images": [], "info": { "version": 1, "author": "xcode" } }
-            JSON
-          fi
-
-      - name: Build (unsigned device build)
-        script: |
-          set -euo pipefail
-          APP_NAME="ProcureFinder"
-          PROJECT_PATH="$CM_BUILD_DIR/ProcureFinder.xcodeproj"
-          SCHEME="$APP_NAME"
-          BUILD_DIR="$CM_BUILD_DIR/build"
-          mkdir -p "$BUILD_DIR"
-
-          xcodebuild \
-            -project "$PROJECT_PATH" \
-            -scheme "$SCHEME" \
-            -configuration Release \
+          xcodebuild build \
+            -project "$APP_PROJECT" \
+            -scheme "$APP_SCHEME" \
+            -configuration "$BUILD_CONFIGURATION" \
             -sdk iphoneos \
-            -destination "generic/platform=iOS" \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGNING_IDENTITY= \
-            clean build \
-            -derivedDataPath "$BUILD_DIR/Derived" \
-            | tee "$BUILD_DIR/xcodebuild.log"
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_IDENTITY= \
+            -derivedDataPath "$DERIVED_DATA"
+          
+          APP_PATH="$DERIVED_DATA/Build/Products/$BUILD_CONFIGURATION-iphoneos/$APP_SCHEME.app"
+          test -d "$APP_PATH"
+          echo "APP_PATH=$APP_PATH"
 
-      - name: Package unsigned .ipa (for Sideloadly)
+      - name: Package unsigned IPA (für Sideloadly)
         script: |
           set -euo pipefail
-          APP_PRODUCT="$CM_BUILD_DIR/build/Derived/Build/Products/Release-iphoneos/ProcureFinder.app"
-          OUT_DIR="$CM_BUILD_DIR/build/ipa"
-          if [ ! -d "$APP_PRODUCT" ]; then
-            echo "ERROR: .app missing at $APP_PRODUCT"
-            exit 2
-          fi
-          rm -rf "$OUT_DIR"
-          mkdir -p "$OUT_DIR/Payload"
-          cp -R "$APP_PRODUCT" "$OUT_DIR/Payload/ProcureFinder.app"
-          (cd "$OUT_DIR" && zip -qry "../ProcureFinder-unsigned.ipa" Payload)
-          echo "IPA packaged at build/ProcureFinder-unsigned.ipa"
+          APP_PATH="$DERIVED_DATA/Build/Products/$BUILD_CONFIGURATION-iphoneos/$APP_SCHEME.app"
+          PKG_DIR="$CM_BUILD_DIR/pkg"
+          mkdir -p "$PKG_DIR/Payload"
+          cp -R "$APP_PATH" "$PKG_DIR/Payload/$APP_SCHEME.app"
+          (cd "$PKG_DIR" && /usr/bin/zip -qry "../$APP_SCHEME-unsigned.ipa" Payload)
+          echo "IPA_PATH=$CM_BUILD_DIR/$APP_SCHEME-unsigned.ipa"
 
     artifacts:
-      - build/Derived/Build/Products/Release-iphoneos/ProcureFinder.app
-      - build/ProcureFinder-unsigned.ipa
-      - build/xcodebuild.log
+      - $CM_BUILD_DIR/$APP_SCHEME-unsigned.ipa
+      - $DERIVED_DATA/Build/Products/$BUILD_CONFIGURATION-iphoneos/$APP_SCHEME.app
+      - /tmp/xcodebuild_logs/*.log
+
+    # Absichtlich kein 'publishing:' Block, damit keine E-Mail-Validierung greift
+
