@@ -3,116 +3,97 @@ workflows:
     name: iOS Release
     max_build_duration: 60
     environment:
-      xcode: "15.4"
+      xcode: 15.4
     scripts:
       - name: Show repo tree (debug)
         script: |
+          set -e
           echo "PWD: $(pwd)"
           ls -la
-          echo "---- root ----"
-          ls -la
-          echo "---- ProcureFinder ----"
+          echo "----"
           ls -la ProcureFinder || true
 
       - name: Install XcodeGen
         script: |
           brew install xcodegen || true
-          xcodegen --version || true
+          xcodegen --version
 
       - name: Generate Xcode project from project.yml
         script: |
-          rm -rf ProcureFinder.xcodeproj
-          test -f project.yml || { echo "project.yml not found at repo root"; exit 1; }
-          xcodegen generate --spec project.yml
-          test -d ProcureFinder.xcodeproj || { echo "xcodeproj not generated"; exit 1; }
-
-      - name: Downgrade pbxproj to Xcode 15 format
-        script: |
-          PBX="ProcureFinder.xcodeproj/project.pbxproj"
-          head -n 30 "$PBX" || true
-          # objectVersion (e.g. 77) -> 60 (Xcode 15 compatible)
-          sed -E -i '' 's/objectVersion = [0-9]+;/objectVersion = 60;/' "$PBX"
-          # compatibilityVersion "Xcode 16.0" -> "Xcode 15.0"
-          sed -E -i '' 's/compatibilityVersion = "Xcode [0-9\.]+";/compatibilityVersion = "Xcode 15.0";/' "$PBX"
-          # LastUpgradeCheck angleichen (kosmetisch)
-          sed -E -i '' 's/LastUpgradeCheck = [0-9]+;/LastUpgradeCheck = 1540;/' "$PBX"
-          echo "---- patched header ----"
-          head -n 30 "$PBX"
+          if [ -f project.yml ]; then
+            xcodegen generate
+          fi
+          test -d ProcureFinder.xcodeproj || { echo "ProcureFinder.xcodeproj missing"; exit 1; }
 
       - name: Set build number
         script: |
-          BUILD_NUMBER=$(date +%s)
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "ProcureFinder/Info.plist"
+          set -e
+          BUILD_NUM=${CM_BUILD_ID:-1}
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${BUILD_NUM}" ProcureFinder/Info.plist
 
       - name: Generate App Icons
         script: |
-          if [ -f Scripts/gen_app_icons.py ]; then
-            python3 Scripts/gen_app_icons.py
-          else
-            python3 scripts/gen_app_icons.py
-          fi
+          python3 ProcureFinder/Scripts/gen_app_icons.py || true
 
       - name: Build (unsigned by default; signed archive if vars present)
         script: |
           set -euo pipefail
-          if [ -n "${CM_CERTIFICATE:-}" ] && [ -n "${CM_PROVISIONING_PROFILE:-}" ]; then
-            echo ">> Signed ARCHIVE path"
-            xcodebuild -project ProcureFinder.xcodeproj \
-              -scheme ProcureFinder -configuration Release -sdk iphoneos \
-              -destination generic/platform=iOS \
-              clean archive -archivePath build/ProcureFinder.xcarchive
+          APP_NAME="ProcureFinder"
+          PROJECT_PATH="$CM_BUILD_DIR/ProcureFinder.xcodeproj"
+          SCHEME="$APP_NAME"
+          BUILD_DIR="$CM_BUILD_DIR/build"
+          mkdir -p "$BUILD_DIR"
+
+          if [ -n "${CM_PROVISIONING_PROFILE:-}" ] || [ -n "${APP_STORE_CONNECT_PRIVATE_KEY:-}" ]; then
+            echo "Signed archive path"
+            xcodebuild -project "$PROJECT_PATH" \
+              -scheme "$SCHEME" -configuration Release -sdk iphoneos \
+              -archivePath "$BUILD_DIR/${APP_NAME}.xcarchive" clean archive
           else
-            echo ">> UNSIGNED device build path"
-            xcodebuild -project ProcureFinder.xcodeproj \
-              -scheme ProcureFinder -configuration Release -sdk iphoneos \
+            echo "UNSIGNED device build path"
+            xcodebuild -project "$PROJECT_PATH" \
+              -scheme "$SCHEME" -configuration Release -sdk iphoneos \
               -destination generic/platform=iOS \
-              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGNING_IDENTITY="" \
-              clean build -derivedDataPath build/Derived
+              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGNING_IDENTITY= \
+              clean build -derivedDataPath "$BUILD_DIR/Derived"
           fi
 
       - name: Export / Package IPA
         script: |
           set -euo pipefail
-          if [ -n "${CM_CERTIFICATE:-}" ] && [ -n "${CM_PROVISIONING_PROFILE:-}" ]; then
-            echo "$CM_CERTIFICATE" | base64 --decode > /tmp/cert.p12
-            echo "$CM_PROVISIONING_PROFILE" | base64 --decode > /tmp/profile.mobileprovision
-            KEYCHAIN=build.keychain
-            security create-keychain -p "" $KEYCHAIN
-            security import /tmp/cert.p12 -k $KEYCHAIN -P "${CM_CERTIFICATE_PASSWORD:-}" -T /usr/bin/codesign
-            security default-keychain -s $KEYCHAIN
-            security unlock-keychain -p "" $KEYCHAIN
-            mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-            cp /tmp/profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
+          APP_NAME="ProcureFinder"
+          BUILD_DIR="$CM_BUILD_DIR/build"
+          DERIVED="$BUILD_DIR/Derived"
+          APP_PATH="$DERIVED/Build/Products/Release-iphoneos/${APP_NAME}.app"
+          ARCHIVE_PATH="$BUILD_DIR/${APP_NAME}.xcarchive"
+          OUT_DIR="$BUILD_DIR/ipa"
+          LOG_PATH="$BUILD_DIR/xcodebuild_export.log"
 
-            cat > exportOptions.plist <<'PLIST'
-            <?xml version="1.0" encoding="UTF-8"?>
-            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-            <plist version="1.0"><dict>
-              <key>method</key><string>ad-hoc</string>
-              <key>compileBitcode</key><false/>
-              <key>signingStyle</key><string>manual</string>
-              <key>stripSwiftSymbols</key><true/>
-            </dict></plist>
-            PLIST
+          rm -rf "$OUT_DIR"
+          mkdir -p "$OUT_DIR"
+
+          if [ -d "$ARCHIVE_PATH" ]; then
+            echo "Found archive -> exporting signed IPA"
+            EXPORT_PLIST="$BUILD_DIR/exportOptions.plist"
+            /usr/libexec/PlistBuddy -c 'Clear dict' "$EXPORT_PLIST" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c 'Add :method string ad-hoc' "$EXPORT_PLIST"
+            /usr/libexec/PlistBuddy -c 'Add :compileBitcode bool false' "$EXPORT_PLIST"
+            /usr/libexec/PlistBuddy -c 'Add :stripSwiftSymbols bool true' "$EXPORT_PLIST"
+            /usr/libexec/PlistBuddy -c 'Add :destination string export' "$EXPORT_PLIST"
+            /usr/libexec/PlistBuddy -c 'Add :thinning string <none>' "$EXPORT_PLIST"
 
             xcodebuild -exportArchive \
-              -archivePath build/ProcureFinder.xcarchive \
-              -exportOptionsPlist exportOptions.plist \
-              -exportPath build/ipa
+              -archivePath "$ARCHIVE_PATH" \
+              -exportPath "$OUT_DIR" \
+              -exportOptionsPlist "$EXPORT_PLIST" \
+              -allowProvisioningUpdates | tee "$LOG_PATH"
           else
-            APP_DIR="build/Derived/Build/Products/Release-iphoneos"
-            APP_PATH="$APP_DIR/ProcureFinder.app"
-            test -d "$APP_PATH" || { echo "App not found at $APP_PATH"; ls -la "$APP_DIR"; exit 1; }
-            mkdir -p build/Payload
-            cp -R "$APP_PATH" build/Payload/ProcureFinder.app
-            (cd build && zip -qry ProcureFinder-unsigned.ipa Payload)
-            echo "Created unsigned IPA at build/ProcureFinder-unsigned.ipa"
-          fi
-    artifacts:
-      - build/ipa/*.ipa
-      - build/ProcureFinder-unsigned.ipa
-      - build/Derived/Build/Products/Release-iphoneos/ProcureFinder.app
-      - build/ProcureFinder.xcarchive
-      - xcodebuild.log
+            echo "No archive -> package UNSIGNED IPA for Sideloadly"
+            if [ ! -d "$APP_PATH" ]; then
+              echo "ERROR: App bundle not found at $APP_PATH"
+              exit 1
+            fi
+            PAYLOAD_DIR="_
+
 
 
