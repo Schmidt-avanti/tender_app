@@ -1,14 +1,16 @@
 name: ProcureFinder
 
 options:
-  minimumXcodeGenVersion: 2.37.0
   deploymentTarget:
     iOS: "16.0"
+  # XcodeGen erzeugt default Schemes; wir definieren trotzdem eines explizit
+  createIntermediateGroups: true
 
 settings:
   base:
-    SWIFT_VERSION: 5.0
+    SWIFT_VERSION: 5.9
     IPHONEOS_DEPLOYMENT_TARGET: 16.0
+    PRODUCT_BUNDLE_IDENTIFIER: com.avanti.procurefinder
     PRODUCT_NAME: ProcureFinder
 
 targets:
@@ -16,35 +18,25 @@ targets:
     type: application
     platform: iOS
     deploymentTarget: "16.0"
+    settings:
+      base:
+        INFOPLIST_FILE: ProcureFinder/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
     sources:
       - path: ProcureFinder/Sources
-      - path: ProcureFinder/Resources/Assets.xcassets
+        excludes:
+          - "**/*.md"
+      - path: ProcureFinder/Resources
         type: folder
-      - path: ProcureFinder/Resources/LaunchScreen.storyboard
-        type: file
-      - path: ProcureFinder/Resources/cpv.json
-        type: file
     resources:
       - ProcureFinder/Resources/Assets.xcassets
       - ProcureFinder/Resources/LaunchScreen.storyboard
       - ProcureFinder/Resources/cpv.json
-    info:
-      path: ProcureFinder/Info.plist
-    settings:
-      PRODUCT_BUNDLE_IDENTIFIER: com.avanti.procurefinder
-      ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-      CURRENT_PROJECT_VERSION: 1
-      MARKETING_VERSION: 1.0.0
-      # build in Codemagic ohne Codesigning
-      CODE_SIGN_STYLE: Manual
-      CODE_SIGNING_REQUIRED: NO
-      CODE_SIGNING_ALLOWED: NO
-      DEVELOPMENT_TEAM: ""
+      - ProcureFinder/Info.plist
     scheme:
-      gatherCoverageData: false
-      testTargets:
-        - ProcureFinderTests
-        - ProcureFinderUITests
+      testTargets: []
 
   ProcureFinderTests:
     type: bundle.unit-test
