@@ -39,7 +39,6 @@ workflows:
           PBX="ProcureFinder.xcodeproj/project.pbxproj"
           echo "Before patch:"
           (grep -n 'objectVersion\|compatibilityVersion' "$PBX" || true)
-          # objectVersion 77 -> 60; compatibility "Xcode 16.0" -> "Xcode 15.0"
           /usr/bin/sed -i '' 's/objectVersion = [0-9][0-9]*/objectVersion = 60/' "$PBX"
           /usr/bin/sed -i '' 's/compatibilityVersion = "Xcode [0-9.]*"/compatibilityVersion = "Xcode 15.0"/' "$PBX"
           echo "After patch:"
@@ -75,7 +74,7 @@ workflows:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGNING_IDENTITY= \
             clean build \
             -derivedDataPath "$BUILD_DIR/Derived" \
-            | tee "$BUILD_DIR/xcodebuild.log" | xcpretty
+            | tee "$BUILD_DIR/xcodebuild.log"
 
       - name: Package unsigned .ipa (for Sideloadly)
         script: |
@@ -96,11 +95,3 @@ workflows:
       - build/Derived/Build/Products/Release-iphoneos/ProcureFinder.app
       - build/ProcureFinder-unsigned.ipa
       - build/xcodebuild.log
-
-    publishing:
-      email:
-        recipients:
-          - ${CM_USER_EMAIL}
-        notify:
-          success: true
-          failure: true
