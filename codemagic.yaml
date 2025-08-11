@@ -1,42 +1,46 @@
 workflows:
   ios_release_unsigned:
-    name: iOS Release (unsigned IPA für Sideloadly)
+    name: "iOS Release (unsigned IPA für Sideloadly)"
     max_build_duration: 60
     instance_type: mac_mini_m2
 
     environment:
-      xcode: 16.4   # passt zum Xcode-16-Projektformat
+      xcode: 16.4
       vars:
         SCHEME: "ProcureFinder"
         PROJECT: "ProcureFinder.xcodeproj"
 
     scripts:
-      - name: Repo-Übersicht (Debug)
+      - name: "Repo tree (debug)"
         script: |
           set -euxo pipefail
           pwd
           git rev-parse --short HEAD || true
           ls -la
           echo "---- top-level ----"
-          find . -maxdepth 2 -type f -name "*.xcodeproj" -o -name "project.yml" -print || true
+          find . -maxdepth 2 -type d -name "*.xcodeproj" -print || true
+          find . -maxdepth 2 -type f \( -name "project.yml" -o -name "Project.yml" -o -name "ProcureFinder/project.yml" \) -print || true
 
-      - name: Falls nötig: XcodeGen und .xcodeproj erzeugen
+      - name: "Generate .xcodeproj if needed"
         script: |
           set -euxo pipefail
           if [ -d "$PROJECT" ]; then
-            echo "✅ $PROJECT gefunden"
+            echo "Found $PROJECT"
           else
             if [ -f "project.yml" ] || [ -f "ProcureFinder/project.yml" ] || [ -f "Project.yml" ]; then
-              echo "ℹ️  $PROJECT fehlt, generiere mit XcodeGen…"
-              brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+              echo "Generating $PROJECT with XcodeGen..."
+              if ! command -v xcodegen >/dev/null 2>&1; then
+                brew update || true
+                brew install xcodegen
+              fi
               xcodegen generate
-              test -d "$PROJECT" || { echo "❌ Konnte $PROJECT nicht erzeugen"; exit 66; }
+              test -d "$PROJECT" || { echo "Could not generate $PROJECT"; exit 66; }
             else
-              echo "❌ Weder $PROJECT noch project.yml vorhanden"; exit 66
+              echo "Missing $PROJECT and no project.yml present"; exit 66
             fi
           fi
 
-      - name: Build .app (unsigned, Device)
+      - name: "Build .app (unsigned, device)"
         script: |
           set -euxo pipefail
           DERIVED="$CM_BUILD_DIR/Derived"
@@ -51,19 +55,16 @@ workflows:
             build
 
           APP_DIR="$DERIVED/Build/Products/Release-iphoneos/${SCHEME}.app"
-          test -d "$APP_DIR" || { echo "❌ Built .app nicht gefunden: $APP_DIR"; ls -la "$DERIVED/Build/Products/Release-iphoneos" || true; exit 65; }
+          test -d "$APP_DIR" || { echo "Built .app not found: $APP_DIR"; ls -la "$DERIVED/Build/Products/Release-iphoneos" || true; exit 65; }
 
-          echo "Info.plist prüfen…"
-          /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP_DIR/Info.plist" || { echo "❌ CFBundleIdentifier fehlt"; exit 67; }
-          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP_DIR/Info.plist")
-          case "${BUNDLE_ID:-}" in
-            ""|\$\(*|\$\{*|*PRODUCT_BUNDLE_IDENTIFIER*)
-              echo "❌ CFBundleIdentifier ist leer/unerledigt: '$BUNDLE_ID'"; exit 67;;
-            *)
-              echo "✅ CFBundleIdentifier: $BUNDLE_ID";;
-          esac
+          echo "Validating Info.plist…"
+          BID=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP_DIR/Info.plist" || true)
+          if [ -z "${BID}" ] || [[ "$BID" == *'$('* ]] || [[ "$BID" == *PRODUCT_BUNDLE_IDENTIFIER* ]]; then
+            echo "CFBundleIdentifier invalid: '$BID'"; exit 67
+          fi
+          echo "CFBundleIdentifier=$BID"
 
-      - name: Unsigned IPA für Sideloadly paketieren
+      - name: "Package unsigned IPA (for Sideloadly)"
         script: |
           set -euxo pipefail
           DERIVED="$CM_BUILD_DIR/Derived"
@@ -71,17 +72,14 @@ workflows:
 
           rm -rf Payload ProcureFinder-unsigned.ipa ProcureFinder.app.zip
           mkdir -p Payload
-          # exaktes gebautes .app übernehmen
           rsync -a --delete "$APP_DIR" "Payload/"
 
-          # Sicherheitscheck: Info.plist in der Payload
           /usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "Payload/${SCHEME}.app/Info.plist" >/dev/null
 
-          # Artefakte erstellen
           (cd Payload && zip -qry "../ProcureFinder-unsigned.ipa" .)
           zip -qry "ProcureFinder.app.zip" "Payload/${SCHEME}.app"
 
-      - name: Artefakte ablegen
+      - name: "Publish artifacts"
         script: |
           set -euxo pipefail
           mkdir -p "$CM_ARTIFACTS"
@@ -91,6 +89,7 @@ workflows:
     artifacts:
       - ProcureFinder-unsigned.ipa
       - ProcureFinder.app.zip
+
 
 
 
