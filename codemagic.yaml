@@ -9,13 +9,15 @@ workflows:
         script: |
           echo "PWD: $(pwd)"
           ls -la
-          echo "----"
+          echo "---- root ----"
+          ls -la
+          echo "---- ProcureFinder ----"
           ls -la ProcureFinder || true
 
       - name: Install XcodeGen
         script: |
           brew install xcodegen || true
-          xcodegen --version
+          xcodegen --version || true
 
       - name: Generate Xcode project from project.yml
         script: |
@@ -23,6 +25,19 @@ workflows:
           test -f project.yml || { echo "project.yml not found at repo root"; exit 1; }
           xcodegen generate --spec project.yml
           test -d ProcureFinder.xcodeproj || { echo "xcodeproj not generated"; exit 1; }
+
+      - name: Downgrade pbxproj to Xcode 15 format
+        script: |
+          PBX="ProcureFinder.xcodeproj/project.pbxproj"
+          head -n 30 "$PBX" || true
+          # objectVersion (e.g. 77) -> 60 (Xcode 15 compatible)
+          sed -E -i '' 's/objectVersion = [0-9]+;/objectVersion = 60;/' "$PBX"
+          # compatibilityVersion "Xcode 16.0" -> "Xcode 15.0"
+          sed -E -i '' 's/compatibilityVersion = "Xcode [0-9\.]+";/compatibilityVersion = "Xcode 15.0";/' "$PBX"
+          # LastUpgradeCheck 1600 -> 1540 (nur kosmetisch, hilft Xcode 15 sich „zuständig“ zu fühlen)
+          sed -E -i '' 's/LastUpgradeCheck = [0-9]+;/LastUpgradeCheck = 1540;/' "$PBX"
+          echo "---- patched header ----"
+          head -n 30 "$PBX"
 
       - name: Set build number
         script: |
@@ -37,7 +52,7 @@ workflows:
             python3 scripts/gen_app_icons.py
           fi
 
-      - name: Build (unsigned device build by default; signed archive if vars present)
+      - name: Build (unsigned by default; signed archive if vars present)
         script: |
           set -euo pipefail
           if [ -n "${CM_CERTIFICATE:-}" ] && [ -n "${CM_PROVISIONING_PROFILE:-}" ]; then
@@ -99,6 +114,7 @@ workflows:
       - build/Derived/Build/Products/Release-iphoneos/ProcureFinder.app
       - build/ProcureFinder.xcarchive
       - xcodebuild.log
+
 
 
 
