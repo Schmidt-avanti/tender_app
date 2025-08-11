@@ -3,7 +3,7 @@ workflows:
     name: iOS Release
     max_build_duration: 60
     environment:
-      xcode: 15.4
+      xcode: "15.4"
     scripts:
       - name: Show repo tree (debug)
         script: |
@@ -19,7 +19,6 @@ workflows:
 
       - name: Generate Xcode project from project.yml
         script: |
-          # Safety: remove prebuilt xcodeproj if someone checked it in
           rm -rf ProcureFinder.xcodeproj
           test -f project.yml || { echo "project.yml not found at repo root"; exit 1; }
           xcodegen generate --spec project.yml
@@ -32,7 +31,11 @@ workflows:
 
       - name: Generate App Icons
         script: |
-          python3 scripts/gen_app_icons.py
+          if [ -f Scripts/gen_app_icons.py ]; then
+            python3 Scripts/gen_app_icons.py
+          else
+            python3 scripts/gen_app_icons.py
+          fi
 
       - name: Build (unsigned device build by default; signed archive if vars present)
         script: |
@@ -69,14 +72,12 @@ workflows:
             cat > exportOptions.plist <<'PLIST'
             <?xml version="1.0" encoding="UTF-8"?>
             <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-            <plist version="1.0">
-            <dict>
+            <plist version="1.0"><dict>
               <key>method</key><string>ad-hoc</string>
               <key>compileBitcode</key><false/>
               <key>signingStyle</key><string>manual</string>
               <key>stripSwiftSymbols</key><true/>
-            </dict>
-            </plist>
+            </dict></plist>
             PLIST
 
             xcodebuild -exportArchive \
@@ -97,6 +98,7 @@ workflows:
       - build/ProcureFinder-unsigned.ipa
       - build/Derived/Build/Products/Release-iphoneos/ProcureFinder.app
       - build/ProcureFinder.xcarchive
-      - **/*.log
+      - xcodebuild.log
+
 
 
